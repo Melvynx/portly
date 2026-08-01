@@ -1,0 +1,408 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		6D36C4983C1F321D0A05AF7E /* PortlyServiceClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D72888852A55FCA7F7897177 /* PortlyServiceClientTests.swift */; };
+		753E811373C5A052430A46E7 /* PortlyServiceClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8ED2DD1E3A1F324B1856F0AB /* PortlyServiceClient.swift */; };
+		BC2B47B1493BBCA610FBCE3F /* PortlyCompanionApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D56CEFDCD2F23490ADE6924D /* PortlyCompanionApp.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		5245767FDD7837A7FB7C486F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7B804FF48C8A06DDD38CC0FB /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 38504957BA9CE2942511C3D0;
+			remoteInfo = PortlyCompanion;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		77A0D54B627098E286FA3BF0 /* PortlyCompanionTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PortlyCompanionTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		7971B79D297F08A14A80CEFB /* PortlyCompanion.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PortlyCompanion.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8ED2DD1E3A1F324B1856F0AB /* PortlyServiceClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortlyServiceClient.swift; sourceTree = "<group>"; };
+		D56CEFDCD2F23490ADE6924D /* PortlyCompanionApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortlyCompanionApp.swift; sourceTree = "<group>"; };
+		D72888852A55FCA7F7897177 /* PortlyServiceClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortlyServiceClientTests.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		140CDD26C0F4DB639752F524 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				7971B79D297F08A14A80CEFB /* PortlyCompanion.app */,
+				77A0D54B627098E286FA3BF0 /* PortlyCompanionTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		440826FDA62A5EE80D3B14F6 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				D72888852A55FCA7F7897177 /* PortlyServiceClientTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		46B3F40984DC724A802339C9 = {
+			isa = PBXGroup;
+			children = (
+				49E69FB98DBCE5EC65562510 /* Sources */,
+				440826FDA62A5EE80D3B14F6 /* Tests */,
+				140CDD26C0F4DB639752F524 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		49E69FB98DBCE5EC65562510 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				D56CEFDCD2F23490ADE6924D /* PortlyCompanionApp.swift */,
+				8ED2DD1E3A1F324B1856F0AB /* PortlyServiceClient.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		38504957BA9CE2942511C3D0 /* PortlyCompanion */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3FC3B5B9F745F41D5357E59B /* Build configuration list for PBXNativeTarget "PortlyCompanion" */;
+			buildPhases = (
+				78F10019910D370818C3A273 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PortlyCompanion;
+			packageProductDependencies = (
+			);
+			productName = PortlyCompanion;
+			productReference = 7971B79D297F08A14A80CEFB /* PortlyCompanion.app */;
+			productType = "com.apple.product-type.application";
+		};
+		45341CC49CD23CBB5A4E10D3 /* PortlyCompanionTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 752BD6015B16F7DAD7E8AF47 /* Build configuration list for PBXNativeTarget "PortlyCompanionTests" */;
+			buildPhases = (
+				B8906DFBD1DE48232E8623D7 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				531170043DED4E86FE264E9B /* PBXTargetDependency */,
+			);
+			name = PortlyCompanionTests;
+			packageProductDependencies = (
+			);
+			productName = PortlyCompanionTests;
+			productReference = 77A0D54B627098E286FA3BF0 /* PortlyCompanionTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		7B804FF48C8A06DDD38CC0FB /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					38504957BA9CE2942511C3D0 = {
+						DevelopmentTeam = UUFHFWGCU4;
+						ProvisioningStyle = Automatic;
+					};
+					45341CC49CD23CBB5A4E10D3 = {
+						DevelopmentTeam = UUFHFWGCU4;
+					};
+				};
+			};
+			buildConfigurationList = 960ADFC61AB5432D364FFDDA /* Build configuration list for PBXProject "PortlyCompanion" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 46B3F40984DC724A802339C9;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 140CDD26C0F4DB639752F524 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				38504957BA9CE2942511C3D0 /* PortlyCompanion */,
+				45341CC49CD23CBB5A4E10D3 /* PortlyCompanionTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		78F10019910D370818C3A273 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BC2B47B1493BBCA610FBCE3F /* PortlyCompanionApp.swift in Sources */,
+				753E811373C5A052430A46E7 /* PortlyServiceClient.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B8906DFBD1DE48232E8623D7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6D36C4983C1F321D0A05AF7E /* PortlyServiceClientTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		531170043DED4E86FE264E9B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 38504957BA9CE2942511C3D0 /* PortlyCompanion */;
+			targetProxy = 5245767FDD7837A7FB7C486F /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		17EF02B755BFC9BB6B183418 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = UUFHFWGCU4;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		60DC61790895F1B0D8F0DE84 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.portly.companion.tests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PortlyCompanion.app/Contents/MacOS/PortlyCompanion";
+			};
+			name = Release;
+		};
+		7A47A33F2249295835428BEF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Resources/PortlyCompanion.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.portly.companion;
+				PRODUCT_MODULE_NAME = PortlyCompanion;
+				PRODUCT_NAME = PortlyCompanion;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		AC3476C46BD62583964B68E3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Resources/PortlyCompanion.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.portly.companion;
+				PRODUCT_MODULE_NAME = PortlyCompanion;
+				PRODUCT_NAME = PortlyCompanion;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		BB7D53DA4422FC393F08B06C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.portly.companion.tests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PortlyCompanion.app/Contents/MacOS/PortlyCompanion";
+			};
+			name = Debug;
+		};
+		E0835901F4C29C8092E6CD54 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = UUFHFWGCU4;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		3FC3B5B9F745F41D5357E59B /* Build configuration list for PBXNativeTarget "PortlyCompanion" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7A47A33F2249295835428BEF /* Debug */,
+				AC3476C46BD62583964B68E3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		752BD6015B16F7DAD7E8AF47 /* Build configuration list for PBXNativeTarget "PortlyCompanionTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BB7D53DA4422FC393F08B06C /* Debug */,
+				60DC61790895F1B0D8F0DE84 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		960ADFC61AB5432D364FFDDA /* Build configuration list for PBXProject "PortlyCompanion" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				17EF02B755BFC9BB6B183418 /* Debug */,
+				E0835901F4C29C8092E6CD54 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 7B804FF48C8A06DDD38CC0FB /* Project object */;
+}

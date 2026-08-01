@@ -8,3 +8,4 @@ website/.vercel/
 website/.vite/
 website/.wrangler/
 website/dev-dist/
+StoreApp/build/
