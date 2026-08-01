@@ -93,8 +93,18 @@ if [ "$INSTALL" -eq 1 ]; then
   echo "==> Installing"
   if pgrep -x Portly >/dev/null 2>&1; then
     echo "    quitting the running Portly (this stops your servers)"
+    if command -v portly >/dev/null 2>&1; then
+      portly quit >/dev/null 2>&1 || true
+    fi
     osascript -e 'quit app "Portly"' >/dev/null 2>&1 || true
-    sleep 2
+    for _ in {1..20}; do
+      pgrep -x Portly >/dev/null 2>&1 || break
+      sleep 0.25
+    done
+    if pgrep -x Portly >/dev/null 2>&1; then
+      echo "    Portly did not quit; close its open sheet and run the installer again" >&2
+      exit 1
+    fi
   fi
   if [ -e /Applications/Portly.app ]; then
     trash /Applications/Portly.app

@@ -34,6 +34,7 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
     private var healthTimer: Timer?
     private var restartWork: DispatchWorkItem?
     private var killWork: DispatchWorkItem?
+    private var takeoverPending = false
     private var consecutiveHealthFailures = 0
     private var lastHealthyAt: Date?
 
@@ -126,6 +127,7 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
 
     func start() {
         guard !isRunning else { return }
+        takeoverPending = false
         restartWork?.cancel()
         restartWork = nil
         manualStop = false
@@ -146,6 +148,7 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
 
     func stop(then completion: (() -> Void)? = nil) {
         guard let process, process.running, process.shellPid > 0 else {
+            takeoverPending = false
             setState(.stopped)
             completion?()
             return
@@ -179,6 +182,14 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
         lastError = nil
         healthy = false
         consecutiveHealthFailures = 0
+
+        if let port = config.port, let occupant = PortInspector.occupant(of: port) {
+            lastError = "Port \(port) is already used by \(occupant.command) (pid \(occupant.pid))"
+            logs.note("cannot start, \(lastError!)")
+            setState(.failed)
+            onFailed?(self)
+            return
+        }
 
         let dir = workingDirectory
         var isDir: ObjCBool = false
@@ -216,8 +227,15 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
     /// bare exec would not have.
     private func environmentArray() -> [String] {
         var env = ProcessInfo.processInfo.environment
+        // Portly owns a real PTY. Do not inherit NO_COLOR from the app launcher
+        // or an agent shell: it would flatten Vite, pnpm and other rich output.
+        env.removeValue(forKey: "NO_COLOR")
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
+        env["FORCE_COLOR"] = "1"
+        env["CLICOLOR"] = "1"
+        env["CLICOLOR_FORCE"] = "1"
+        env["TERM_PROGRAM"] = "Portly"
         env["PORTLY"] = "1"
         env["PORTLY_SERVER"] = config.name
         if let port = config.port {
@@ -225,6 +243,50 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
         }
         for (k, v) in config.env { env[k] = v }
         return env.map { "\($0.key)=\($0.value)" }
+    }
+
+    /// Stop a listener launched outside Portly, then start this configured
+    /// server as soon as the port is released. The explicit UI/CLI action is
+    /// the authority boundary; Portly never takes over automatically.
+    @discardableResult
+    func takeOverPort() -> Bool {
+        guard !isRunning, let port = config.port, let occupant = PortInspector.occupant(of: port) else {
+            return false
+        }
+        logs.note("taking over port \(port) from \(occupant.command) (pid \(occupant.pid))")
+        guard PortInspector.kill(pid: occupant.pid) else {
+            lastError = "Unable to stop \(occupant.command) (pid \(occupant.pid))"
+            setState(.failed)
+            return false
+        }
+        takeoverPending = true
+        lastError = "Waiting for port \(port) to be released"
+        setState(.starting)
+        terminal?.feed(text: "\u{1B}[33m[portly] moving port \(port) from \(occupant.command)…\u{1B}[0m\r\n")
+        waitForPortRelease(port: port, attemptsRemaining: 25)
+        return true
+    }
+
+    private func waitForPortRelease(port: Int, attemptsRemaining: Int) {
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            guard let self else { return }
+            let occupied = PortInspector.isListening(port: port)
+            DispatchQueue.main.async {
+                guard self.takeoverPending else { return }
+                if !occupied {
+                    self.takeoverPending = false
+                    self.lastError = nil
+                    self.spawn()
+                } else if attemptsRemaining > 1 {
+                    self.waitForPortRelease(port: port, attemptsRemaining: attemptsRemaining - 1)
+                } else {
+                    self.takeoverPending = false
+                    self.lastError = "Port \(port) was not released after 5 seconds"
+                    self.logs.note(self.lastError!)
+                    self.setState(.failed)
+                }
+            }
+        }
     }
 
     // MARK: - Health

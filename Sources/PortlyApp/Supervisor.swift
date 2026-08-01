@@ -222,6 +222,24 @@ final class Supervisor: ObservableObject {
         store.config.projects.first { $0.servers.contains { $0.id == serverID } }
     }
 
+    func server(configuredOn port: Int, excluding serverID: String? = nil) -> (project: Project, server: ServerConfig)? {
+        for project in store.config.projects {
+            if let server = project.servers.first(where: { $0.port == port && $0.id != serverID }) {
+                return (project, server)
+            }
+        }
+        return nil
+    }
+
+    func nextAvailablePort(startingAt start: Int = 3000, excluding serverID: String? = nil) -> Int {
+        for port in max(1, start)...65_535 {
+            if server(configuredOn: port, excluding: serverID) == nil, PortInspector.occupant(of: port) == nil {
+                return port
+            }
+        }
+        return start
+    }
+
     // MARK: - Ports
 
     func occupant(of port: Int) -> PortOccupant? {

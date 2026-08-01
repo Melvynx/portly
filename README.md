@@ -38,10 +38,11 @@ portly add-server \
 
 portly logs codelynx/web --tail 100
 portly restart codelynx/web --json
+portly take-over codelynx/web --json
 portly stop --project codelynx --json
 ```
 
-Other commands are `start`, `stop`, `restart`, `update-server`, `remove`, `port`, `kill-port`, `open`, `quit`, and `config`. Run `portly <command> --help` for exact flags. `quit` stops every managed server because the app is the supervisor.
+Other commands are `start`, `stop`, `restart`, `take-over` (`adopt`), `update-server`, `remove`, `port`, `kill-port`, `open`, `quit`, and `config`. `take-over` stops an external listener on the configured port and relaunches the server under Portly. Run `portly <command> --help` for exact flags. `quit` stops every managed server because the app is the supervisor.
 
 ## Configuration
 
@@ -96,6 +97,7 @@ The control API listens only on `127.0.0.1:7737`. It can start processes, so it 
 | `POST` | `/start`, `/stop`, `/restart` | Act on a server or project |
 | `POST` | `/projects/add`, `/projects/remove` | Mutate projects |
 | `POST` | `/servers/add`, `/servers/update`, `/servers/remove` | Mutate servers |
+| `POST` | `/servers/take-over` | Move an external listener under Portly |
 | `POST` | `/ports/kill` | Send SIGTERM to a port occupant |
 | `POST` | `/open`, `/quit` | Control the app |
 

@@ -30,6 +30,8 @@ Use `start`, `stop`, or `restart` with a server, or `--project <project>`. `port
 
 Inspect conflicts with `portly port <port> --json`. Use `portly kill-port <port> --json` only when the kill is requested or the occupant is confirmed in scope. Portly sends SIGTERM and never auto-kills conflicts.
 
+When a configured server's port is held by a process launched elsewhere, use `portly take-over <project/server> --json` (alias: `adopt`). Portly sends SIGTERM, waits for the port to be released, then starts the configured command itself. Never take over an unknown process without confirming it is in scope.
+
 Keep proof distinct: `status` proves Portly state, `logs` proves captured child output, `port` proves a listener, and `curl` proves the meaningful route responds.
 
 ## Remove, quit, and configure

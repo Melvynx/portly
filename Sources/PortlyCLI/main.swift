@@ -82,7 +82,7 @@ struct Portly: ParsableCommand {
         subcommands: [
             Status.self, Start.self, Stop.self, Restart.self, Logs.self,
             AddProject.self, AddServer.self, UpdateServer.self,
-            Remove.self, Port.self, KillPort.self, Open.self, Quit.self, Config.self,
+            Remove.self, TakeOver.self, Port.self, KillPort.self, Open.self, Quit.self, Config.self,
         ],
         defaultSubcommand: Status.self
     )
@@ -346,6 +346,29 @@ struct Remove: ParsableCommand {
             } else {
                 fail("Pass a server name, or --project <name>.")
             }
+        } catch {
+            fail(error.localizedDescription)
+        }
+    }
+}
+
+struct TakeOver: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "take-over",
+        abstract: "Stop an external listener and relaunch the configured server under Portly.",
+        aliases: ["adopt"]
+    )
+
+    @Argument(help: "Server name or id. Use project/server to disambiguate.")
+    var server: String
+
+    @OptionGroup var options: GlobalOptions
+
+    func run() throws {
+        do {
+            let body = PortlyAPI.TakeOverRequest(server: server)
+            let response = try client(options).post("servers/take-over", body, as: PortlyAPI.ActionResponse.self)
+            emit(response, json: options.json) { $0.message }
         } catch {
             fail(error.localizedDescription)
         }

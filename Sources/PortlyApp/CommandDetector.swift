@@ -11,12 +11,30 @@ enum CommandDetector {
         let command: String
         let port: Int?
         let directory: String?
+        /// Framework CLIs such as Vite accept a forwarded `--port` argument.
+        let supportsPortArgument: Bool
         /// What the guess is based on, shown next to the row.
         let source: String
         var id: String { command + (directory ?? "") }
+
+        init(
+            name: String,
+            command: String,
+            port: Int?,
+            directory: String?,
+            supportsPortArgument: Bool = false,
+            source: String
+        ) {
+            self.name = name
+            self.command = command
+            self.port = port
+            self.directory = directory
+            self.supportsPortArgument = supportsPortArgument
+            self.source = source
+        }
     }
 
-    static func suggestions(inProjectRoot root: String) -> [Suggestion] {
+    static func suggestions(inProjectRoot root: String, reservedPorts: Set<Int> = []) -> [Suggestion] {
         let base = URL(fileURLWithPath: NSString(string: root).expandingTildeInPath)
         guard FileManager.default.fileExists(atPath: base.path) else { return [] }
 
@@ -30,7 +48,23 @@ enum CommandDetector {
         found += others(in: base, relativeTo: base)
 
         var seen = Set<String>()
-        return found.filter { seen.insert($0.id).inserted }
+        var availablePorts: [Int: Int] = [:]
+        return found.filter { seen.insert($0.id).inserted }.map { suggestion in
+            guard let port = suggestion.port else { return suggestion }
+            let available = availablePorts[port] ?? nextAvailablePort(startingAt: port, reservedPorts: reservedPorts)
+            availablePorts[port] = available
+            let command = available != port && suggestion.supportsPortArgument
+                ? "\(suggestion.command) -- --port \(available)"
+                : suggestion.command
+            return Suggestion(
+                name: suggestion.name,
+                command: command,
+                port: available,
+                directory: suggestion.directory,
+                supportsPortArgument: suggestion.supportsPortArgument,
+                source: suggestion.source
+            )
+        }
     }
 
     // MARK: - Node
@@ -53,11 +87,14 @@ enum CommandDetector {
 
         return devScriptNames(scripts.keys).map { key in
             let script = scripts[key] ?? ""
+            let configuredPort = portFromScript(script) ?? envPort
+            let detectedFrameworkPort = frameworkPort(deps: deps, script: script)
             return Suggestion(
                 name: serverName(script: key, directory: relative),
                 command: "\(runner) \(key)",
-                port: portFromScript(script) ?? envPort ?? frameworkPort(deps: deps, script: script),
+                port: configuredPort ?? detectedFrameworkPort,
                 directory: relative,
+                supportsPortArgument: configuredPort == nil && detectedFrameworkPort != nil,
                 source: label
             )
         }
@@ -152,6 +189,7 @@ enum CommandDetector {
     /// `--port 3001`, `-p 3001`, `PORT=3001`.
     private static func portFromScript(_ script: String) -> Int? {
         let patterns = [
+            #"PORT=\$\{PORT:-(\d{2,5})\}"#,
             #"--port[= ]+(\d{2,5})"#,
             #"(?:^|\s)-p[= ]+(\d{2,5})"#,
             #"PORT[= ]+(\d{2,5})"#,
@@ -166,6 +204,15 @@ enum CommandDetector {
             return port
         }
         return nil
+    }
+
+    private static func nextAvailablePort(startingAt port: Int, reservedPorts: Set<Int>) -> Int {
+        for candidate in port...65_535 {
+            if !reservedPorts.contains(candidate), PortInspector.occupant(of: candidate) == nil {
+                return candidate
+            }
+        }
+        return port
     }
 
     private static func portFromEnvFiles(in dir: URL) -> Int? {

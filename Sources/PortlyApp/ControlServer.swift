@@ -141,6 +141,12 @@ final class ControlServer {
                 if project.servers.contains(where: { $0.name.caseInsensitiveCompare(body.name) == .orderedSame }) {
                     return (400, try fail("\(project.name) already has a server named '\(body.name)'"))
                 }
+                if let port = body.port, let conflict = supervisor.server(configuredOn: port) {
+                    let next = supervisor.nextAvailablePort(startingAt: 3000)
+                    return (400, try fail(
+                        "Port \(port) is already configured for \(conflict.project.name)/\(conflict.server.name). Try \(next)."
+                    ))
+                }
                 let server = ServerConfig(
                     name: body.name,
                     command: body.command,
@@ -169,6 +175,12 @@ final class ControlServer {
                 if let v = body.healthURL { config.healthURL = v }
                 if let v = body.healthStatus { config.healthStatus = v }
                 if let v = body.autoRestart { config.autoRestart = v }
+                if let port = config.port, let conflict = supervisor.server(configuredOn: port, excluding: config.id) {
+                    let next = supervisor.nextAvailablePort(startingAt: 3000, excluding: config.id)
+                    return (400, try fail(
+                        "Port \(port) is already configured for \(conflict.project.name)/\(conflict.server.name). Try \(next)."
+                    ))
+                }
                 supervisor.updateServer(config)
                 return (200, try ok(config))
 
@@ -180,6 +192,19 @@ final class ControlServer {
                 let name = runtime.config.name
                 supervisor.removeServer(id: runtime.id)
                 return (200, try ok(PortlyAPI.ActionResponse(affected: [runtime.id], message: "Removed server \(name)")))
+
+            case ("POST", "/servers/take-over"):
+                let body: PortlyAPI.TakeOverRequest = try request.decode()
+                guard let runtime = supervisor.resolveServer(body.server) else {
+                    return (404, try fail("No server matching '\(body.server)'"))
+                }
+                guard runtime.takeOverPort() else {
+                    return (400, try fail("The configured port is free, already managed, or could not be stopped"))
+                }
+                return (200, try ok(PortlyAPI.ActionResponse(
+                    affected: [runtime.id],
+                    message: "Moving port \(runtime.config.port.map(String.init) ?? "") to Portly"
+                )))
 
             case ("GET", "/ports"):
                 guard let raw = request.query["port"], let port = Int(raw) else {

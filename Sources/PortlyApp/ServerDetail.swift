@@ -110,12 +110,21 @@ struct ServerDetail: View {
         HStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
-            Text("Port \(String(occupant.port)) is held by \(occupant.command) (pid \(String(occupant.pid))).")
-                .font(.system(size: 12))
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Running outside Portly")
+                    .font(.system(size: 12, weight: .medium))
+                Text("\(occupant.command) (pid \(String(occupant.pid))) is using port \(String(occupant.port)).")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
-            Button("Kill It") {
+            Button("Stop process") {
                 PortInspector.kill(pid: occupant.pid)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: refreshConflict)
+            }
+            .controlSize(.small)
+            Button("Move to Portly") {
+                if runtime.takeOverPort() { conflict = nil }
             }
             .controlSize(.small)
         }

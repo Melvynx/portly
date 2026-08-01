@@ -125,6 +125,11 @@ public enum PortlyAPI {
         public init(port: Int) { self.port = port }
     }
 
+    public struct TakeOverRequest: Codable {
+        public var server: String
+        public init(server: String) { self.server = server }
+    }
+
     public struct ActionResponse: Codable {
         public var affected: [String]
         public var message: String
