@@ -110,19 +110,53 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
         if let terminal { return terminal }
         let view = TerminalView(frame: CGRect(x: 0, y: 0, width: 800, height: 480))
         view.terminalDelegate = self
-        view.font = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
-        view.nativeForegroundColor = NSColor(name: nil) { appearance in
-            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                ? NSColor(srgbRed: 0.88, green: 0.9, blue: 0.92, alpha: 1)
-                : NSColor(srgbRed: 0.16, green: 0.18, blue: 0.21, alpha: 1)
-        }
-        view.nativeBackgroundColor = NSColor(name: nil) { appearance in
-            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                ? NSColor(srgbRed: 0.055, green: 0.065, blue: 0.08, alpha: 1)
-                : NSColor(srgbRed: 0.975, green: 0.98, blue: 0.985, alpha: 1)
-        }
+        view.font = Self.terminalFont
+        view.nativeForegroundColor = TerminalTheme.foreground
+        view.nativeBackgroundColor = TerminalTheme.background
+        view.installColors(Self.terminalPalette)
+        view.useBrightColors = true
+        view.caretColor = NSColor(srgbRed: 0.49, green: 0.78, blue: 1, alpha: 1)
+        view.caretTextColor = TerminalTheme.background
+        view.selectedTextBackgroundColor = NSColor(srgbRed: 0.16, green: 0.22, blue: 0.32, alpha: 1)
+        view.selectedTextForegroundColor = NSColor(srgbRed: 0.96, green: 0.97, blue: 0.99, alpha: 1)
         terminal = view
         return view
+    }
+
+    /// Geist Mono gives output a modern editor feel instead of looking like a
+    /// generic system console. The fallbacks keep Portly usable on another Mac.
+    private static var terminalFont: NSFont {
+        NSFont(name: "GeistMono-Regular", size: 13)
+            ?? NSFont(name: "CommitMono-Regular", size: 13)
+            ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+    }
+
+    /// A calm, editor-inspired ANSI palette. Bright variants remain distinct
+    /// without the saturated red/green/blue of the default terminal palette.
+    private static let terminalPalette: [SwiftTerm.Color] = [
+        terminalColor(0x1B1D23), // black
+        terminalColor(0xFF6B81), // red
+        terminalColor(0xA7D46F), // green
+        terminalColor(0xF5C76D), // yellow
+        terminalColor(0x82AAFF), // blue
+        terminalColor(0xC792EA), // magenta
+        terminalColor(0x63D4D5), // cyan
+        terminalColor(0xD8DEE9), // white
+        terminalColor(0x5C6370), // bright black
+        terminalColor(0xFF879A), // bright red
+        terminalColor(0xC3E88D), // bright green
+        terminalColor(0xFFD580), // bright yellow
+        terminalColor(0x9CC4FF), // bright blue
+        terminalColor(0xDDB6F2), // bright magenta
+        terminalColor(0x89DDFF), // bright cyan
+        terminalColor(0xFFFFFF), // bright white
+    ]
+
+    private static func terminalColor(_ hex: UInt32) -> SwiftTerm.Color {
+        let red = UInt16((hex >> 16) & 0xFF) * 257
+        let green = UInt16((hex >> 8) & 0xFF) * 257
+        let blue = UInt16(hex & 0xFF) * 257
+        return SwiftTerm.Color(red: red, green: green, blue: blue)
     }
 
     // MARK: - Lifecycle

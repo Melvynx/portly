@@ -80,7 +80,18 @@ struct MainView: View {
             }
         }
         .listStyle(.sidebar)
+        // Running projects float to the top, so rows change place on their own.
+        // Letting them travel keeps the list readable instead of teleporting.
+        .animation(Motion.reorder, value: runningSignature)
         .safeAreaInset(edge: .bottom) { sidebarActions }
+    }
+
+    /// Changes exactly when the running/idle split changes, which is what drives
+    /// the sidebar order — not on every uptime tick.
+    private var runningSignature: String {
+        supervisor.projects
+            .map { projectIsRunning($0) ? "1" : "0" }
+            .joined()
     }
 
     private var sidebarProjects: [Project] {
@@ -388,13 +399,10 @@ private struct ProjectServerRow: View {
             Text(runtime.state.label)
                 .font(PortlyTypography.label)
                 .foregroundStyle(.secondary)
-            if runtime.isRunning {
-                Button { runtime.stop() } label: { Image(systemName: "stop.fill") }
-                    .buttonStyle(.borderless)
-            } else {
-                Button { runtime.start() } label: { Image(systemName: "play.fill") }
-                    .buttonStyle(.borderless)
-            }
+                .contentTransition(.opacity)
+                .animation(Motion.state, value: runtime.state)
+            StartStopButton(runtime: runtime)
+                .buttonStyle(.borderless)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())

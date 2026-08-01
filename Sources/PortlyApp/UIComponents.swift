@@ -35,12 +35,22 @@ extension ServerState {
         case .failed: return .red
         }
     }
+
+    /// States that are on their way somewhere else, rather than settled.
+    var isSettling: Bool {
+        self == .starting || self == .restarting
+    }
 }
 
-/// The standard macOS status dot: a filled circle, nothing more.
+/// The standard macOS status dot: a filled circle, nothing more — except while a
+/// server is coming up, when it breathes. A settling server is the one thing you
+/// most want to read from across the room without parsing text.
 struct StatusDot: View {
     let state: ServerState
     var size: CGFloat = 8
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var breathing = false
 
     var body: some View {
         Circle()
@@ -50,7 +60,20 @@ struct StatusDot: View {
                 Circle().strokeBorder(Color.black.opacity(0.12), lineWidth: 0.5)
             )
             .shadow(color: state.color.opacity(state == .stopped ? 0 : 0.34), radius: 3)
+            .opacity(breathing ? 0.4 : 1)
+            // Reduced motion keeps the fade, which aids comprehension, and drops
+            // the size change, which is movement.
+            .scaleEffect(breathing && !reduceMotion ? 0.86 : 1)
+            .animation(Motion.state, value: state)
+            .animation(breathing ? Motion.pulse : Motion.state, value: breathing)
+            .onAppear { syncBreathing() }
+            .onChange(of: state) { syncBreathing() }
             .help(state.label)
+    }
+
+    private func syncBreathing() {
+        guard breathing != state.isSettling else { return }
+        breathing = state.isSettling
     }
 }
 
@@ -63,6 +86,7 @@ struct StatusBadge: View {
             StatusDot(state: state, size: 8)
             Text(state.label)
                 .font(PortlyTypography.bodyMedium)
+                .contentTransition(.opacity)
         }
         .padding(.horizontal, 9)
         .frame(height: 26)
@@ -74,6 +98,31 @@ struct StatusBadge: View {
             Capsule(style: .continuous)
                 .strokeBorder(state.color.opacity(0.2), lineWidth: 0.75)
         }
+        .animation(Motion.state, value: state)
+    }
+}
+
+/// One button that becomes the other, instead of two buttons that swap places.
+/// Keeping a single control means the click target never moves under the cursor
+/// and the symbol can cross-dissolve the way every other macOS transport does.
+struct StartStopButton: View {
+    @ObservedObject var runtime: ServerRuntime
+    var symbolSize: CGFloat?
+
+    var body: some View {
+        Button {
+            if runtime.isRunning {
+                runtime.stop()
+            } else {
+                runtime.start()
+            }
+        } label: {
+            Image(systemName: runtime.isRunning ? "stop.fill" : "play.fill")
+                .contentTransition(.symbolEffect(.replace))
+                .font(symbolSize.map { .system(size: $0) })
+        }
+        .animation(Motion.state, value: runtime.isRunning)
+        .help(runtime.isRunning ? "Stop" : "Start")
     }
 }
 

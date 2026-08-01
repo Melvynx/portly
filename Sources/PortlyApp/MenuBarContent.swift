@@ -69,6 +69,9 @@ struct MenuBarContent: View {
             Text(summary)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .contentTransition(.numericText())
+                .animation(Motion.state, value: supervisor.runningCount)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -182,23 +185,8 @@ private struct MenuBarServerRow: View {
 
             Spacer(minLength: 4)
 
-            if runtime.isRunning {
-                Button {
-                    runtime.stop()
-                } label: {
-                    Image(systemName: "stop.fill").font(.system(size: 9))
-                }
+            StartStopButton(runtime: runtime, symbolSize: 9)
                 .buttonStyle(.borderless)
-                .help("Stop")
-            } else {
-                Button {
-                    runtime.start()
-                } label: {
-                    Image(systemName: "play.fill").font(.system(size: 9))
-                }
-                .buttonStyle(.borderless)
-                .help("Start")
-            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 3)
@@ -207,6 +195,7 @@ private struct MenuBarServerRow: View {
                 .fill(hovering ? Color.secondary.opacity(0.12) : Color.clear)
                 .padding(.horizontal, 6)
         )
+        .animation(Motion.hover, value: hovering)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture {

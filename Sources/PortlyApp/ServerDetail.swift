@@ -14,27 +14,49 @@ struct ServerDetail: View {
         VStack(spacing: 0) {
             infoBar
             Divider()
+            // The conflict is found by an async lsof, so it lands well after the
+            // pane is drawn. Sliding it down from the top edge makes it read as
+            // a banner arriving rather than the terminal jumping.
             if let conflict, !conflict.ownedByPortly {
-                conflictBanner(conflict)
-                Divider()
+                VStack(spacing: 0) {
+                    conflictBanner(conflict)
+                    Divider()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
             if runtime.state == .stopped {
                 stoppedState
+                    .transition(.opacity)
             } else {
                 TerminalPane(runtime: runtime)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.opacity)
             }
         }
+        .clipped()
+        .animation(Motion.banner, value: conflict?.pid)
+        .animation(Motion.paneSwap, value: runtime.state == .stopped)
         .toolbar {
             ToolbarItemGroup {
+                Button {
+                    if runtime.isRunning {
+                        runtime.stop()
+                    } else {
+                        runtime.start()
+                    }
+                } label: {
+                    Label(
+                        runtime.isRunning ? "Stop" : "Start",
+                        systemImage: runtime.isRunning ? "stop.fill" : "play.fill"
+                    )
+                    .contentTransition(.symbolEffect(.replace))
+                }
+                .animation(Motion.state, value: runtime.isRunning)
+                .help(runtime.isRunning ? "Stop the server" : "Start the server")
+
                 if runtime.isRunning {
-                    Button { runtime.stop() } label: { Label("Stop", systemImage: "stop.fill") }
-                        .help("Stop the server")
                     Button { runtime.restart() } label: { Label("Restart", systemImage: "arrow.clockwise") }
                         .help("Restart the server")
-                } else {
-                    Button { runtime.start() } label: { Label("Start", systemImage: "play.fill") }
-                        .help("Start the server")
                 }
 
                 if let url = runtime.url {
