@@ -10,7 +10,7 @@ Portly requires macOS 14 or newer and Swift 6.
 ./build.sh --run
 ```
 
-This builds and ad-hoc signs `Portly.app`, installs it in `/Applications`, installs `portly` in the first writable bin directory on `PATH`, installs the bundled skill in `~/.agents/skills/portly`, adds idempotent Portly server-management rules to `~/.agents/AGENTS.md`, and launches the app. Reinstalling quits the running app first, which stops every server supervised by Portly.
+This builds and ad-hoc signs `Portly.app`, installs it in `/Applications`, installs `portly` in the first writable bin directory on `PATH`, installs the bundled skill in `~/.agents/skills/portly`, adds idempotent Portly server-management rules to `~/.agents/AGENTS.md`, and launches the app. Reinstalling quits the running app first, which stops every server supervised by Portly. Public GitHub releases are signed with Developer ID and notarized by Apple.
 
 To launch Portly automatically at every macOS login, use:
 
@@ -22,6 +22,18 @@ portly forever status --json
 `portly forever enable` preserves and restarts the servers that were active during the handoff to `launchd`. `portly forever disable` removes the LaunchAgent recoverably and leaves active servers running under a regular Portly launch. This mode supervises the macOS app; Linux requires a separate headless daemon because SwiftUI/AppKit cannot run there.
 
 Use `./build.sh --no-install` to assemble `dist/Portly.app` without installing it.
+
+## Updates and releases
+
+Portly checks the signed Sparkle feed once a day and also exposes **Check for Updates…** in the app menu and Settings. The installed version is visible in Settings and in the standard About window.
+
+To publish a new version, update the single value in `Sources/PortlyCore/Version.swift`, commit and push it, then run:
+
+```bash
+./release.sh 0.1.2
+```
+
+The release script requires a clean, pushed commit. It creates a hardened-runtime Developer ID build, submits it to Apple for notarization, staples the ticket, signs the update with the Sparkle key stored in the macOS Keychain, and publishes `Portly-macOS.zip` plus `appcast.xml` to a versioned GitHub release. The landing page and the app feed both follow GitHub's latest release URLs.
 
 ## CLI
 

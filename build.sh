@@ -5,6 +5,7 @@
 #   ./build.sh --no-install   build only, leaves the bundle in ./dist
 #   ./build.sh --run          build, install, and relaunch the app
 #   ./build.sh --forever      build, install, and enable launch at login
+#   ./build.sh --release      signed + notarized ZIP and Sparkle appcast
 
 set -euo pipefail
 
@@ -14,6 +15,7 @@ APP="$DIST/Portly.app"
 INSTALL=1
 RUN=0
 FOREVER=0
+RELEASE=0
 RUNNING_SERVERS=()
 
 for arg in "$@"; do
@@ -21,6 +23,7 @@ for arg in "$@"; do
     --no-install) INSTALL=0 ;;
     --run) RUN=1 ;;
     --forever) FOREVER=1 ;;
+    --release) RELEASE=1; INSTALL=0 ;;
     *) echo "Unknown flag: $arg" >&2; exit 1 ;;
   esac
 done
@@ -31,22 +34,26 @@ swift build -c release --product PortlyApp
 swift build -c release --product portly
 
 BIN_DIR="$(swift build -c release --show-bin-path)"
+VERSION="$(grep -o '"[0-9][^"]*"' "$ROOT/Sources/PortlyCore/Version.swift" | tr -d '"')"
+SPARKLE_ACCOUNT="${PORTLY_SPARKLE_ACCOUNT:-dev.portly.app}"
+SPARKLE_PUBLIC_KEY="$(tr -d '\n' < "$ROOT/Config/sparkle-public-key")"
+SPARKLE_FEED_URL="https://github.com/Melvynx/portly/releases/latest/download/appcast.xml"
 
 echo "==> Assembling Portly.app"
 if [ -e "$APP" ]; then
   trash "$APP"
 fi
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 
 cp "$BIN_DIR/PortlyApp" "$APP/Contents/MacOS/Portly"
+cp -R "$BIN_DIR/Sparkle.framework" "$APP/Contents/Frameworks/"
+install_name_tool -add_rpath '@executable_path/../Frameworks' "$APP/Contents/MacOS/Portly"
 
 # SwiftTerm ships a resource bundle; carry it along if this build produced one.
 for bundle in "$BIN_DIR"/*.bundle; do
   [ -e "$bundle" ] || continue
   cp -R "$bundle" "$APP/Contents/Resources/"
 done
-
-VERSION="$(grep -o '"[0-9][^"]*"' "$ROOT/Sources/PortlyCore/Version.swift" | tr -d '"')"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -69,6 +76,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 	<string>${VERSION}</string>
 	<key>CFBundleVersion</key>
 	<string>${VERSION}</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.developer-tools</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>NSPrincipalClass</key>
@@ -79,6 +88,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 	<false/>
 	<key>NSSupportsSuddenTermination</key>
 	<false/>
+	<key>SUFeedURL</key>
+	<string>${SPARKLE_FEED_URL}</string>
+	<key>SUPublicEDKey</key>
+	<string>${SPARKLE_PUBLIC_KEY}</string>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
 </dict>
 </plist>
 PLIST
@@ -90,8 +105,61 @@ else
   echo "    skipped (icon generation failed, using the default)"
 fi
 
-echo "==> Signing (ad-hoc)"
-codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || echo "    ad-hoc signing failed, continuing"
+if [ "$RELEASE" -eq 1 ]; then
+  SIGN_IDENTITY="${PORTLY_SIGN_IDENTITY:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application:[^"]*\)".*/\1/p' | head -1)}"
+  if [ -z "$SIGN_IDENTITY" ]; then
+    echo "No Developer ID Application identity is available in the keychain." >&2
+    exit 1
+  fi
+  echo "==> Signing for Developer ID distribution"
+  codesign --force --deep --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP"
+  codesign --verify --deep --strict --verbose=2 "$APP"
+
+  ARCHIVE="$DIST/Portly-macOS.zip"
+  if [ -e "$ARCHIVE" ]; then
+    trash "$ARCHIVE"
+  fi
+  echo "==> Archiving"
+  ditto -c -k --sequesterRsrc --keepParent "$APP" "$ARCHIVE"
+
+  echo "==> Notarizing with Apple"
+  asc notarization submit --file "$ARCHIVE" --wait --timeout 1h --output table
+  xcrun stapler staple "$APP"
+  xcrun stapler validate "$APP"
+
+  # The final archive contains the stapled ticket, so it works even when the
+  # first launch cannot reach Apple's notarization service.
+  trash "$ARCHIVE"
+  ditto -c -k --sequesterRsrc --keepParent "$APP" "$ARCHIVE"
+  spctl --assess --type execute --verbose=2 "$APP"
+
+  echo "==> Generating Sparkle appcast"
+  UPDATE_DIR="$DIST/update"
+  if [ -e "$UPDATE_DIR" ]; then
+    trash "$UPDATE_DIR"
+  fi
+  mkdir -p "$UPDATE_DIR"
+  cp "$ARCHIVE" "$UPDATE_DIR/"
+  if [ -n "${PORTLY_PREVIOUS_APPCAST:-}" ] && [ -f "$PORTLY_PREVIOUS_APPCAST" ]; then
+    cp "$PORTLY_PREVIOUS_APPCAST" "$UPDATE_DIR/appcast.xml"
+  fi
+  GENERATE_APPCAST="$(find "$ROOT/.build/artifacts" -type f -name generate_appcast -print -quit)"
+  if [ -z "$GENERATE_APPCAST" ]; then
+    echo "Sparkle's generate_appcast tool was not found." >&2
+    exit 1
+  fi
+  "$GENERATE_APPCAST" \
+    --account "$SPARKLE_ACCOUNT" \
+    --download-url-prefix "https://github.com/Melvynx/portly/releases/download/v${VERSION}/" \
+    --link "https://portly.melvynx.dev" \
+    "$UPDATE_DIR"
+  cp "$UPDATE_DIR/appcast.xml" "$DIST/appcast.xml"
+  echo "    $ARCHIVE"
+  echo "    $DIST/appcast.xml"
+else
+  echo "==> Signing (ad-hoc)"
+  codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || echo "    ad-hoc signing failed, continuing"
+fi
 
 if [ "$INSTALL" -eq 1 ]; then
   echo "==> Installing"

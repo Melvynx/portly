@@ -7,6 +7,7 @@ struct PortlyApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var supervisor = Supervisor.shared
     @AppStorage(PortlyPreferences.showMenuBarItemKey) private var showMenuBarItem = true
+    private let updater = PortlyUpdater.shared
 
     var body: some Scene {
         Window("Portly", id: WindowOpener.mainWindowID) {
@@ -18,6 +19,11 @@ struct PortlyApp: App {
         .defaultSize(width: 1080, height: 660)
         .commands {
             CommandGroup(replacing: .newItem) {}
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") {
+                    updater.checkForUpdates()
+                }
+            }
         }
 
         MenuBarExtra(isInserted: $showMenuBarItem) {

@@ -65,6 +65,13 @@ private struct GeneralSettingsView: View {
                     NSWorkspace.shared.activateFileViewerSelecting([PortlyPaths.configFile])
                 }
             }
+
+            Section("Portly") {
+                LabeledContent("Version", value: appVersion)
+                Button("Check for Updates…") {
+                    PortlyUpdater.shared.checkForUpdates()
+                }
+            }
         }
         .formStyle(.grouped)
         .task { launchAtLogin = SMAppService.mainApp.status == .enabled }
@@ -76,6 +83,11 @@ private struct GeneralSettingsView: View {
         } message: {
             Text(loginItemError ?? "The login setting could not be changed.")
         }
+    }
+
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+            ?? portlyVersion
     }
 
     private func updateLaunchAtLogin(_ enabled: Bool) {

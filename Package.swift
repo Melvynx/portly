@@ -12,6 +12,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.2.0"),
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.2"),
     ],
     targets: [
         .target(
@@ -24,6 +25,7 @@ let package = Package(
             dependencies: [
                 "PortlyCore",
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
+                .product(name: "Sparkle", package: "Sparkle"),
             ],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
