@@ -1,0 +1,4 @@
+interface:
+  display_name: "Portly"
+  short_description: "Manage local dev servers with Portly"
+  default_prompt: "Use $portly to add, start, inspect, or troubleshoot a local dev server."
