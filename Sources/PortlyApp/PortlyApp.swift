@@ -74,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let server = ControlServer(supervisor: Supervisor.shared, port: Supervisor.shared.settings.apiPort)
         server.start()
         control = server
+        Supervisor.shared.resumeAfterUpdaterRelaunchIfNeeded()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

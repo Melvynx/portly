@@ -14,6 +14,14 @@ final class Supervisor: ObservableObject {
     private let store: ConfigStore
     private(set) var runtimes: [String: ServerRuntime] = [:]
 
+    private struct UpdaterRelaunchState: Codable {
+        let serverIDs: [String]
+    }
+
+    private var updaterRelaunchStateURL: URL {
+        PortlyPaths.configDirectory.appendingPathComponent("resume-after-update.json")
+    }
+
     var settings: PortlyConfig { store.config }
 
     private init() {
@@ -115,6 +123,42 @@ final class Supervisor: ObservableObject {
 
     func stopAll() {
         runtimes.values.forEach { $0.stop() }
+    }
+
+    /// Sparkle terminates the app to replace it. Remember only the servers that
+    /// were active at that instant, then consume this marker on the new launch.
+    /// A normal quit never writes the marker and therefore keeps its existing
+    /// "quit means stop everything" behavior.
+    func prepareForUpdaterRelaunch() {
+        let ids = runtimes.values
+            .filter(\.isRunning)
+            .map(\.id)
+            .sorted()
+
+        guard !ids.isEmpty else {
+            try? FileManager.default.removeItem(at: updaterRelaunchStateURL)
+            return
+        }
+
+        do {
+            PortlyPaths.ensureDirectories()
+            let data = try JSONEncoder().encode(UpdaterRelaunchState(serverIDs: ids))
+            try data.write(to: updaterRelaunchStateURL, options: .atomic)
+        } catch {
+            NSLog("[portly] could not save update relaunch state: \(error)")
+        }
+    }
+
+    func resumeAfterUpdaterRelaunchIfNeeded() {
+        let url = updaterRelaunchStateURL
+        guard let data = try? Data(contentsOf: url),
+              let state = try? JSONDecoder().decode(UpdaterRelaunchState.self, from: data)
+        else { return }
+
+        // Consume before starting anything so a crash cannot create an endless
+        // restart loop on every future manual launch.
+        try? FileManager.default.removeItem(at: url)
+        state.serverIDs.forEach { runtimes[$0]?.start() }
     }
 
     /// Blocks briefly on quit so children get a chance to die with us.
