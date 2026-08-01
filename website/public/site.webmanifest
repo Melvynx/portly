@@ -1,0 +1,10 @@
+{
+  "name": "Portly",
+  "short_name": "Portly",
+  "description": "One supervisor for every local development server.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#07090d",
+  "theme_color": "#07090d",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

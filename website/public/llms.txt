@@ -1,0 +1,10 @@
+# Portly
+
+Portly is an open-source native macOS supervisor for local development servers.
+
+It gives humans and AI coding agents one source of truth for project commands, ports, process IDs, health, logs, and ownership. Portly exposes a native app, a command-line interface, and a loopback-only HTTP API.
+
+- Website: https://portly.melvynx.dev
+- Source: https://github.com/Melvynx/portly
+- License: MIT
+- Platform: macOS 14 or newer
