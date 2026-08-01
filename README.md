@@ -33,7 +33,7 @@ To publish a new version, update the single value in `Sources/PortlyCore/Version
 ./release.sh 0.1.2
 ```
 
-The release script requires a clean, pushed commit. It creates a hardened-runtime Developer ID build, submits it to Apple for notarization, staples the ticket, signs the update with the Sparkle key stored in the macOS Keychain, and publishes `Portly-macOS.zip` plus `appcast.xml` to a versioned GitHub release. The landing page and the app feed both follow GitHub's latest release URLs.
+The release script builds a universal Apple silicon and Intel binary from the pushed commit. It creates a hardened-runtime Developer ID build, submits it to Apple for notarization, staples the ticket, signs the update with the Sparkle key stored in the macOS Keychain, and publishes `Portly-macOS.zip` plus `appcast.xml` to a versioned GitHub release. The landing page and the app feed both follow GitHub's latest release URLs.
 
 ## CLI
 

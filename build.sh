@@ -30,10 +30,18 @@ done
 
 echo "==> Building (release)"
 cd "$ROOT"
-swift build -c release --product PortlyApp
+if [ "$RELEASE" -eq 1 ]; then
+  swift build -c release --triple arm64-apple-macosx14.0 --product PortlyApp
+  swift build -c release --triple x86_64-apple-macosx14.0 --product PortlyApp
+  ARM64_BIN_DIR="$(swift build -c release --triple arm64-apple-macosx14.0 --show-bin-path)"
+  X86_64_BIN_DIR="$(swift build -c release --triple x86_64-apple-macosx14.0 --show-bin-path)"
+  BIN_DIR="$ARM64_BIN_DIR"
+else
+  swift build -c release --product PortlyApp
+  BIN_DIR="$(swift build -c release --show-bin-path)"
+fi
 swift build -c release --product portly
 
-BIN_DIR="$(swift build -c release --show-bin-path)"
 VERSION="$(grep -o '"[0-9][^"]*"' "$ROOT/Sources/PortlyCore/Version.swift" | tr -d '"')"
 SPARKLE_ACCOUNT="${PORTLY_SPARKLE_ACCOUNT:-dev.portly.app}"
 SPARKLE_PUBLIC_KEY="$(tr -d '\n' < "$ROOT/Config/sparkle-public-key")"
@@ -45,7 +53,21 @@ if [ -e "$APP" ]; then
 fi
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 
-cp "$BIN_DIR/PortlyApp" "$APP/Contents/MacOS/Portly"
+if [ "$RELEASE" -eq 1 ]; then
+  lipo -create "$ARM64_BIN_DIR/PortlyApp" "$X86_64_BIN_DIR/PortlyApp" -output "$APP/Contents/MacOS/Portly"
+  ARCHITECTURES="$(lipo -archs "$APP/Contents/MacOS/Portly")"
+  case " $ARCHITECTURES " in
+    *" arm64 "*) ;;
+    *) echo "Universal build is missing arm64: $ARCHITECTURES" >&2; exit 1 ;;
+  esac
+  case " $ARCHITECTURES " in
+    *" x86_64 "*) ;;
+    *) echo "Universal build is missing x86_64: $ARCHITECTURES" >&2; exit 1 ;;
+  esac
+  echo "    architectures: $ARCHITECTURES"
+else
+  cp "$BIN_DIR/PortlyApp" "$APP/Contents/MacOS/Portly"
+fi
 cp -R "$BIN_DIR/Sparkle.framework" "$APP/Contents/Frameworks/"
 install_name_tool -add_rpath '@executable_path/../Frameworks' "$APP/Contents/MacOS/Portly"
 
