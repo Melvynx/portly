@@ -11,23 +11,23 @@ export const Route = createRootRoute({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Portly — One supervisor for every local server" },
+      { title: "Portly: one supervisor for every local server" },
       {
         name: "description",
         content:
-          "Portly gives AI coding agents one shared source of truth for local development servers, ports, health, and logs.",
+          "Portly runs each local development server once, then gives every AI agent the same live state: port, PID, health, and logs.",
       },
-      { name: "theme-color", content: "#07090d" },
+      { name: "theme-color", content: "#090b0d" },
       { property: "og:type", content: "website" },
       { property: "og:site_name", content: "Portly" },
       {
         property: "og:title",
-        content: "Portly — Stop launching the same app five times",
+        content: "Portly: your agents keep starting the same server",
       },
       {
         property: "og:description",
         content:
-          "One native macOS supervisor gives every AI agent the same live context for local servers.",
+          "A native macOS supervisor that runs each local server once and reports its port, PID, health, and logs as JSON.",
       },
       { property: "og:url", content: "https://portly.melvynx.dev" },
       {

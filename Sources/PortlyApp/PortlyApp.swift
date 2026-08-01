@@ -6,6 +6,7 @@ import SwiftUI
 struct PortlyApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var supervisor = Supervisor.shared
+    @AppStorage(PortlyPreferences.showMenuBarItemKey) private var showMenuBarItem = true
 
     var body: some Scene {
         Window("Portly", id: WindowOpener.mainWindowID) {
@@ -19,29 +20,42 @@ struct PortlyApp: App {
             CommandGroup(replacing: .newItem) {}
         }
 
-        MenuBarExtra {
+        MenuBarExtra(isInserted: $showMenuBarItem) {
             MenuBarContent()
                 .environmentObject(supervisor)
         } label: {
             MenuBarLabel(supervisor: supervisor)
         }
         .menuBarExtraStyle(.window)
+
+        Settings {
+            SettingsView()
+                .environmentObject(supervisor)
+        }
     }
 }
 
-/// The menu bar glyph. Filled when something is running, badged when something
-/// needs attention.
+/// The menu bar glyph: the Portly mark, its process dot filled when something is
+/// running, badged when something needs attention.
 private struct MenuBarLabel: View {
     @ObservedObject var supervisor: Supervisor
+    @AppStorage(PortlyPreferences.showMenuBarNameKey) private var showName = false
 
     var body: some View {
-        Image(systemName: symbol)
-            .accessibilityLabel("Portly")
-    }
+        HStack(spacing: 4) {
+            Image(nsImage: PortlyGlyph.menuBarImage(active: supervisor.runningCount > 0))
+                .renderingMode(.template)
 
-    private var symbol: String {
-        if supervisor.hasProblem { return "bolt.horizontal.circle.fill" }
-        return supervisor.runningCount > 0 ? "bolt.horizontal.circle.fill" : "bolt.horizontal.circle"
+            if showName {
+                Text("Portly")
+            }
+
+            if supervisor.hasProblem {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 9))
+            }
+        }
+        .accessibilityLabel("Portly")
     }
 }
 

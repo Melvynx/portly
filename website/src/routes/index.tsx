@@ -1,80 +1,89 @@
 import { createFileRoute } from "@tanstack/react-router";
 import {
-  ArrowDown,
-  ArrowRight,
-  Bot,
+  ArrowUpRight,
   Check,
   ChevronRight,
-  CircleGauge,
-  Code2,
+  Copy,
   Download,
-  ExternalLink,
-  HeartPulse,
-  ListTree,
-  Network,
   Play,
-  RefreshCw,
-  ShieldCheck,
-  Square,
-  SquareTerminal,
-  X,
+  Square as SquareIcon,
+  Terminal as TerminalIcon,
+  TriangleAlert,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { ProcessDemo } from "../components/process-demo";
-import { ProductWindow } from "../components/product-window";
+import { useState } from "react";
+import { AgentConsole } from "../components/agent-console";
+import { DuplicateDemo } from "../components/duplicate-demo";
 import { PortlyMark } from "../components/portly-mark";
+import { projects, runningSummary } from "../components/portly-state";
+import { PortsWindow } from "../components/ports-window";
+import { ProductWindow } from "../components/product-window";
 
 const repoUrl = "https://github.com/Melvynx/portly";
 const downloadUrl = `${repoUrl}/releases/latest/download/Portly-macOS.zip`;
+/* Must be paste-and-run: same three steps the install block below prints. */
+const installCommand = `git clone ${repoUrl}.git && cd portly && ./build.sh --run`;
 
 export const Route = createFileRoute("/")({
   component: LandingPage,
 });
 
-const painPoints = [
-  "Every agent guesses whether the app is already running.",
-  "Each new task grabs another port and starts another process tree.",
-  "Logs, health, and ownership disappear across terminal tabs.",
-  "Your laptop pays the cost for context the agent never received.",
+const facts = [
+  ["Native Swift 6", "One 4 MB app bundle. No Electron, no Node daemon."],
+  [
+    "127.0.0.1 only",
+    "The control API can spawn processes, so it never binds to the network.",
+  ],
+  [
+    "Real PTYs",
+    "Colors, prompts, and scrollback survive the way they do in your terminal.",
+  ],
+  [
+    "MIT licensed",
+    "Every line that can start a process is readable in the repo.",
+  ],
 ];
 
-const benefits = [
-  "One live source of truth for projects, servers, ports, PIDs, and health.",
-  "A stable CLI and JSON API that agents can inspect before they act.",
-  "Persistent PTYs and logs without duplicate background jobs.",
-  "Explicit takeovers when a server was started outside Portly.",
-];
-
-const features = [
+const capabilities = [
   {
-    icon: Bot,
-    title: "Built for coding agents",
-    body: "Agents inspect structured live state before launching anything, then reuse the process that already exists.",
+    title: "Process supervision",
+    body: "Each server runs through zsh -lc in a real pseudo terminal, so nvm, mise, and your shell PATH behave exactly as they do when you type the command yourself.",
+    detail: "PORT · PORTLY=1 · PORTLY_SERVER",
   },
   {
-    icon: SquareTerminal,
-    title: "Real interactive terminals",
-    body: "Each server runs in a true PTY with readable output, persistent scrollback, and log files you can inspect later.",
+    title: "Health, not liveness",
+    body: "A TCP probe on the configured port, or an HTTP path with an expected status. A process that is alive but not serving your route is reported unhealthy.",
+    detail: "healthIntervalSeconds: 10",
   },
   {
-    icon: HeartPulse,
-    title: "Health, not guesswork",
-    body: "Port and HTTP checks show whether a process is merely alive or actually serving the route you expect.",
-  },
-  {
-    icon: RefreshCw,
     title: "Crash recovery",
-    body: "Restart unhealthy processes automatically, cap retry loops, and keep the last exit and failure visible.",
+    body: "Unhealthy servers restart automatically until the retry budget runs out, then park as failed with the last exit code and error still visible.",
+    detail: "maxRestartAttempts: 5",
   },
   {
-    icon: Network,
-    title: "Safe port ownership",
-    body: "See exactly what owns a port. Portly never kills an unknown process without an explicit takeover.",
+    title: "Port ownership",
+    body: "Ask who holds a port and get the PID, the command, and the user. Portly sends SIGTERM only when you ask it to, and never adopts an unknown process on its own.",
+    detail: "portly port 3000 --json",
   },
   {
-    icon: ShieldCheck,
-    title: "Local by design",
-    body: "The control API binds to 127.0.0.1 only. Your commands, paths, logs, and project state stay on your Mac.",
+    title: "Logs that outlive the tab",
+    body: "In-memory scrollback for the app plus a rotating file per server, readable from the CLI long after the terminal that started it is gone.",
+    detail: "~/.config/portly/logs/",
+  },
+  {
+    title: "One hand-editable config",
+    body: "Projects, commands, ports, and health checks live in a single JSON file that Portly watches. Edit it, commit it, or let the app write it.",
+    detail: "~/.config/portly/config.json",
+  },
+  {
+    title: "Launch at login",
+    body: "A per-user LaunchAgent that carries the servers running at handoff into the supervised session, and gives them back when you disable it.",
+    detail: "portly forever enable",
+  },
+  {
+    title: "Loopback HTTP API",
+    body: "Every CLI action is a route. Responses are JSON envelopes with ok, data, and error, which is what makes the whole thing scriptable.",
+    detail: "GET /status · POST /start",
   },
 ];
 
@@ -95,7 +104,7 @@ function LandingPage() {
   };
 
   return (
-    <div className="site-shell">
+    <>
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareJsonLd) }}
@@ -103,447 +112,346 @@ function LandingPage() {
       <SiteHeader />
 
       <main id="main-content">
-        <section className="hero section-pad">
-          <div className="hero-glow" aria-hidden="true" />
+        <section className="hero">
           <div className="hero-copy">
-            <div className="eyebrow">
-              <span className="status-dot status-green" />
-              Native macOS server supervisor
-            </div>
-            <h1>
-              Stop launching the same app <em>five times.</em>
-            </h1>
-            <p className="hero-description">
-              Portly gives every AI coding agent the same live context for your
-              local servers—what is running, where it runs, and whether it is
-              healthy.
+            <a className="tag" href={`${repoUrl}/releases`}>
+              <i className="dot dot-live" />
+              v0.1.0 for macOS 14+
+              <ChevronRight size={13} aria-hidden="true" />
+            </a>
+            <h1>Your agents keep starting the same server.</h1>
+            <p className="lede">
+              Portly runs it once. Every agent, terminal, and task then reads
+              the same live state: what is running, on which port, under which
+              PID, and whether it is actually healthy.
             </p>
-            <div className="hero-actions">
-              <a className="button button-primary" href={downloadUrl}>
-                <Download size={17} aria-hidden="true" />
+            <div className="actions">
+              <a className="btn btn-primary" href={downloadUrl}>
+                <Download size={16} aria-hidden="true" />
                 Download for macOS
               </a>
-              <a className="button button-secondary" href={repoUrl}>
-                <GithubLogo size={17} />
-                View source
+              <a className="btn btn-ghost" href={repoUrl}>
+                <GithubMark size={16} />
+                Source
               </a>
             </div>
-            <div
-              className="hero-meta"
-              aria-label="Platform requirements and license"
-            >
-              <span>macOS 14+</span>
-              <i aria-hidden="true" />
-              <span>Swift 6</span>
-              <i aria-hidden="true" />
-              <span>MIT licensed</span>
-            </div>
+            <CopyLine value={installCommand} />
           </div>
 
-          <div className="hero-product">
-            <div className="hero-product-label">
-              <span>
-                <CircleGauge size={15} aria-hidden="true" /> Live server state
-              </span>
-              <code>localhost:7737</code>
-            </div>
+          <div className="hero-stage">
             <ProductWindow />
           </div>
-
-          <a
-            className="scroll-cue"
-            href="#problem"
-            aria-label="Read about the problem Portly solves"
-          >
-            <ArrowDown size={17} aria-hidden="true" />
-          </a>
         </section>
 
-        <div className="proof-strip" aria-label="Product highlights">
-          <span>
-            <Check size={14} /> One process per server
-          </span>
-          <span>
-            <Check size={14} /> Agent-ready JSON
-          </span>
-          <span>
-            <Check size={14} /> Persistent local logs
-          </span>
-          <span>
-            <Check size={14} /> Loopback-only API
-          </span>
-        </div>
+        <ul className="facts">
+          {facts.map(([title, body]) => (
+            <li key={title}>
+              <strong>{title}</strong>
+              <span>{body}</span>
+            </li>
+          ))}
+        </ul>
 
-        <section className="problem section-pad" id="problem">
-          <SectionHeading
-            kicker="The problem"
-            title={
-              <>
-                Five tasks should not mean <em>five copies of your app.</em>
-              </>
-            }
-            description="Agents start background jobs because they lack shared runtime context. The result is duplicate process trees, random fallback ports, fragmented logs, and a laptop doing five times the work."
-          />
+        <Section
+          id="problem"
+          kicker="The cost"
+          title="Five parallel tasks, five copies of your app."
+          lede="An agent starts a background job because nothing told it the server already exists. Do that across four terminals and two editors and you get duplicate process trees, fallback ports nobody wrote down, logs split across tabs, and a laptop doing the same work five times over."
+        >
+          <DuplicateDemo />
+        </Section>
 
-          <div className="comparison-grid">
-            <article className="comparison-card comparison-card-bad">
-              <div className="comparison-label">
-                <X size={15} /> Without Portly
-              </div>
-              <div className="process-math">
-                <strong>5</strong>
-                <span>agents</span>
-                <i>×</i>
-                <strong>5</strong>
-                <span>apps</span>
-                <i>=</i>
-                <strong className="bad-number">25</strong>
-                <span>processes</span>
-              </div>
-              <ul>
-                {painPoints.map((item) => (
-                  <li key={item}>
-                    <X size={15} aria-hidden="true" />
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </article>
-            <article className="comparison-card comparison-card-good">
-              <div className="comparison-label">
-                <Check size={15} /> With Portly
-              </div>
-              <div className="process-math">
-                <strong>5</strong>
-                <span>agents</span>
-                <i>→</i>
-                <strong className="good-number">1</strong>
-                <span>supervisor</span>
-                <i>→</i>
-                <strong>1</strong>
-                <span>process</span>
-              </div>
-              <ul>
-                {benefits.map((item) => (
-                  <li key={item}>
-                    <Check size={15} aria-hidden="true" />
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </article>
-          </div>
-        </section>
-
-        <section className="demo-section section-pad" id="demo">
-          <SectionHeading
-            kicker="Interactive demo"
-            title={
-              <>
-                Give the agent context <em>before it acts.</em>
-              </>
-            }
-            description="Portly turns a hidden runtime into explicit shared state. Compare the process sprawl with the supervised path."
-          />
-          <ProcessDemo />
-        </section>
-
-        <section className="screenshots section-pad" id="screenshots">
-          <div className="split-heading">
-            <SectionHeading
-              kicker="Product tour"
-              title={
-                <>
-                  Everything running. <em>One calm view.</em>
-                </>
-              }
-              description="Portly feels like part of macOS: compact, direct, and always close to the process it controls."
-            />
-            <a className="text-link" href={repoUrl}>
-              Explore the code <ArrowRight size={15} aria-hidden="true" />
+        <Section
+          id="agents"
+          kicker="Agent interface"
+          title="Inspect first. Launch only if needed."
+          lede="Portly ships a skill that Claude Code, Codex, and Cursor pick up from ~/.agents/skills/portly. It teaches one rule: read the live state before you spawn anything. The CLI answers in JSON so the agent never has to parse a spinner."
+          aside={
+            <a className="link" href={`${repoUrl}/tree/main/skills/portly`}>
+              Read the skill
+              <ArrowUpRight size={14} aria-hidden="true" />
             </a>
-          </div>
+          }
+        >
+          <AgentConsole />
+        </Section>
 
-          <div className="screenshot-grid">
-            <div className="screenshot-main">
-              <ProductWindow compact />
-              <div className="screenshot-caption">
-                <div>
-                  <span>01</span>
-                  <strong>Desktop dashboard</strong>
-                </div>
-                <p>
-                  Projects, ports, health, uptime, and terminal output stay
-                  visible in one native workspace.
-                </p>
-              </div>
+        <Section
+          id="app"
+          kicker="The app"
+          title="A native window, a menu bar, nothing in the background."
+          lede="Portly looks and behaves like part of macOS. It is the same supervisor whether you drive it by hand, from the menu bar, or through the CLI."
+        >
+          <div className="tour">
+            <figure className="tour-main">
+              <PortsWindow />
+              <figcaption>
+                <strong>Every listening port, grouped by owner</strong>
+                <span>
+                  What Portly manages, what something else started, and what
+                  macOS will not let anyone touch.
+                </span>
+              </figcaption>
+            </figure>
+
+            <div className="tour-side">
+              <MenuBarCard />
+              <TakeoverCard />
             </div>
-            <div className="screenshot-stack">
-              <MenuBarPreview />
-              <ConflictPreview />
-            </div>
           </div>
-        </section>
+        </Section>
 
-        <section className="workflow section-pad" id="workflow">
-          <SectionHeading
-            kicker="How it works"
-            title={
-              <>
-                One source of truth from <em>first prompt to final process.</em>
-              </>
-            }
-            description="You define the server once. Humans and agents use the same controls from then on."
-          />
-          <div className="workflow-grid">
-            <WorkflowStep
-              number="01"
-              icon={ListTree}
-              title="Register the project"
-              body="Portly detects common dev commands, frameworks, monorepos, and default ports. Confirm the server once."
-              code="portly add-project --path ~/Developer/project"
-            />
-            <WorkflowStep
-              number="02"
-              icon={Code2}
-              title="Let agents inspect"
-              body="The CLI returns structured status, ports, health, logs, and ownership before an agent launches a process."
-              code="portly status --json"
-            />
-            <WorkflowStep
-              number="03"
-              icon={Play}
-              title="Reuse one process"
-              body="Portly starts, supervises, restarts, and shares the same server across every task and terminal."
-              code="portly start project/web --json"
-            />
-          </div>
-        </section>
-
-        <section className="features section-pad" id="features">
-          <SectionHeading
-            kicker="Built for local development"
-            title={
-              <>
-                Small supervisor. <em>Complete runtime context.</em>
-              </>
-            }
-            description="No cloud account, no dashboard subscription, and no process manager hidden behind an agent framework."
-          />
-          <div className="feature-grid">
-            {features.map(({ icon: Icon, title, body }) => (
-              <article className="feature-card" key={title}>
-                <div className="feature-icon">
-                  <Icon size={18} aria-hidden="true" />
-                </div>
-                <h3>{title}</h3>
-                <p>{body}</p>
-              </article>
+        <Section
+          id="capabilities"
+          kicker="Capabilities"
+          title="What the supervisor actually does."
+          lede="No cloud account, no dashboard subscription, no process manager buried inside an agent framework."
+        >
+          <ul className="specs">
+            {capabilities.map((item) => (
+              <li key={item.title}>
+                <h3>{item.title}</h3>
+                <p>{item.body}</p>
+                <code>{item.detail}</code>
+              </li>
             ))}
-          </div>
-        </section>
+          </ul>
+        </Section>
 
-        <section className="open-source section-pad" id="open-source">
-          <div className="open-source-card">
-            <div className="open-source-copy">
-              <div className="eyebrow">
-                <GithubLogo size={14} /> Open source by default
-              </div>
-              <h2>Read every line that can launch a process.</h2>
-              <p>
-                Portly is MIT licensed. Inspect the native app, the CLI, the
-                loopback API, and the agent skill—or help make them better.
-              </p>
-              <div className="open-source-actions">
-                <a className="button button-light" href={repoUrl}>
-                  Star on GitHub <ExternalLink size={15} aria-hidden="true" />
-                </a>
-                <a
-                  className="text-link text-link-light"
-                  href={`${repoUrl}/blob/main/CONTRIBUTING.md`}
-                >
-                  Read the contribution guide{" "}
-                  <ChevronRight size={15} aria-hidden="true" />
-                </a>
-              </div>
-            </div>
-            <div
-              className="source-terminal"
-              aria-label="Portly installation commands"
-            >
-              <div>
-                <span className="terminal-dot" />
-                <span className="terminal-dot" />
-                <span className="terminal-dot" />
-                <code>install.sh</code>
-              </div>
-              <pre>
-                <span>$</span> git clone {repoUrl}.git{"\n"}
-                <span>$</span> cd portly{"\n"}
-                <span>$</span> ./build.sh --run{"\n"}
-                {"\n"}
-                <b>✓ Portly.app installed</b>
-                {"\n"}
-                <b>✓ portly CLI ready</b>
-              </pre>
+        <section className="install" id="install">
+          <div className="install-copy">
+            <p className="kicker">Install</p>
+            <h2>Two lines, then it is yours.</h2>
+            <p className="lede">
+              The script builds the app, ad-hoc signs it, installs the portly
+              binary on your PATH, and drops the agent skill in
+              ~/.agents/skills/portly.
+            </p>
+            <div className="actions">
+              <a className="btn btn-primary" href={downloadUrl}>
+                <Download size={16} aria-hidden="true" />
+                Download the build
+              </a>
+              <a className="btn btn-ghost" href={`${repoUrl}#install`}>
+                <GithubMark size={16} />
+                Build from source
+              </a>
             </div>
           </div>
-        </section>
 
-        <section className="final-cta section-pad">
-          <PortlyMark size={56} />
-          <h2>One Mac. One server. Every agent informed.</h2>
-          <p>Stop paying the process cost of missing context.</p>
-          <div className="hero-actions">
-            <a className="button button-primary" href={downloadUrl}>
-              <Download size={17} /> Download Portly
-            </a>
-            <a className="button button-secondary" href={`${repoUrl}#install`}>
-              <SquareTerminal size={17} /> Install from source
-            </a>
-          </div>
+          <pre className="install-shell" aria-label="Install commands">
+            <span>
+              <b>$</b> git clone {repoUrl}.git{"\n"}
+            </span>
+            <span>
+              <b>$</b> cd portly && ./build.sh --run{"\n"}
+            </span>
+            <span>{"\n"}</span>
+            <span className="ok">
+              ✓ Portly.app installed in /Applications{"\n"}
+            </span>
+            <span className="ok">✓ portly on PATH{"\n"}</span>
+            <span className="ok">
+              ✓ skill linked at ~/.agents/skills/portly{"\n"}
+            </span>
+          </pre>
         </section>
       </main>
 
       <SiteFooter />
-    </div>
+    </>
   );
 }
 
 function SiteHeader() {
   return (
     <header className="site-header">
-      <a className="brand" href="#main-content" aria-label="Portly home">
-        <PortlyMark size={34} />
-        <span>Portly</span>
-      </a>
-      <nav aria-label="Main navigation">
-        <a href="#problem">Problem</a>
-        <a href="#demo">Demo</a>
-        <a href="#features">Features</a>
-        <a href={repoUrl}>GitHub</a>
-      </nav>
-      <a className="header-download" href={downloadUrl}>
-        Download <Download size={14} aria-hidden="true" />
-      </a>
+      <div className="header-inner">
+        <a className="brand" href="/">
+          <PortlyMark size={26} />
+          Portly
+        </a>
+        <nav aria-label="Main">
+          <a href="#problem">Why</a>
+          <a href="#agents">Agents</a>
+          <a href="#app">App</a>
+          <a href="#capabilities">Capabilities</a>
+        </nav>
+        <div className="header-actions">
+          <a
+            className="header-source"
+            href={repoUrl}
+            aria-label="Source on GitHub"
+          >
+            <GithubMark size={16} />
+          </a>
+          <a className="btn btn-small" href={downloadUrl}>
+            Download
+          </a>
+        </div>
+      </div>
     </header>
   );
 }
 
-function SectionHeading({
+function Section({
+  id,
   kicker,
   title,
-  description,
+  lede,
+  aside,
+  children,
 }: {
+  id: string;
   kicker: string;
-  title: ReactNode;
-  description: string;
-}) {
-  return (
-    <div className="section-heading">
-      <p className="section-kicker">{kicker}</p>
-      <h2>{title}</h2>
-      <p className="section-description">{description}</p>
-    </div>
-  );
-}
-
-function WorkflowStep({
-  number,
-  icon: Icon,
-  title,
-  body,
-  code,
-}: {
-  number: string;
-  icon: typeof ListTree;
   title: string;
-  body: string;
-  code: string;
+  lede: string;
+  aside?: ReactNode;
+  children: ReactNode;
 }) {
   return (
-    <article className="workflow-step">
-      <div className="step-top">
-        <span>{number}</span>
-        <Icon size={19} aria-hidden="true" />
+    <section className="section" id={id}>
+      <div className="section-head">
+        <div>
+          <p className="kicker">{kicker}</p>
+          <h2>{title}</h2>
+          <p className="lede">{lede}</p>
+        </div>
+        {aside}
       </div>
-      <h3>{title}</h3>
-      <p>{body}</p>
-      <code>$ {code}</code>
-    </article>
+      {children}
+    </section>
   );
 }
 
-function MenuBarPreview() {
+function CopyLine({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+
   return (
-    <figure className="mini-shot menu-shot">
-      <figcaption className="sr-only">
-        Portly menu bar popover listing three healthy servers.
-      </figcaption>
-      <div className="mini-shot-surface">
-        <div className="menu-title">
+    <button
+      type="button"
+      className={`copy-line ${copied ? "is-copied" : ""}`}
+      onClick={() => {
+        void navigator.clipboard?.writeText(value);
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1600);
+      }}
+    >
+      <code>
+        <b>$</b> {value}
+      </code>
+      {copied ? (
+        <Check size={14} aria-hidden="true" />
+      ) : (
+        <Copy size={14} aria-hidden="true" />
+      )}
+      <span className="sr-only">
+        {copied ? "Command copied" : "Copy install command"}
+      </span>
+    </button>
+  );
+}
+
+/* The 320pt popover from MenuBarContent.swift, over the same machine state. */
+function MenuBarCard() {
+  return (
+    <figure className="card menubar-card">
+      <div className="card-surface" aria-hidden="true">
+        <div className="menubar-head">
           <strong>Portly</strong>
-          <span>3/3 running</span>
+          <span>{runningSummary}</span>
         </div>
-        {[
-          ["NowStack", "web", "3000"],
-          ["Lumail", "workers", "3001"],
-          ["Codelynx", "docs", "5173"],
-        ].map(([project, server, port]) => (
-          <div className="menu-server" key={project}>
-            <span className="status-dot status-green" />
-            <div>
-              <strong>{project}</strong>
-              <small>{server}</small>
+
+        {projects.map((project) => {
+          const Icon = project.icon;
+          return (
+            <div className="menubar-group" key={project.name}>
+              <p className="menubar-project">
+                <Icon size={12} style={{ color: project.color }} />
+                {project.name}
+                <span className="menubar-project-actions" aria-hidden="true">
+                  <Play size={9} fill="currentColor" strokeWidth={0} />
+                  <SquareIcon size={9} fill="currentColor" strokeWidth={0} />
+                </span>
+              </p>
+
+              {project.servers.map((server) => (
+                <p className="menubar-row" key={server.name}>
+                  <i className={`app-dot is-${server.state}`} />
+                  <span>{server.name}</span>
+                  <code>:{server.port}</code>
+                  <span className="menubar-row-action" aria-hidden="true">
+                    {server.state === "running" ? (
+                      <SquareIcon
+                        size={9}
+                        fill="currentColor"
+                        strokeWidth={0}
+                      />
+                    ) : (
+                      <Play size={9} fill="currentColor" strokeWidth={0} />
+                    )}
+                  </span>
+                </p>
+              ))}
             </div>
-            <code>:{port}</code>
-            <Square size={10} fill="currentColor" />
-          </div>
-        ))}
-        <div className="menu-footer">
-          Open Portly <ChevronRight size={12} />
+          );
+        })}
+
+        <div className="menubar-foot">
+          <span>Open Portly</span>
+          <span>Ports</span>
+          <span className="menubar-foot-end">Stop All</span>
+          <span>Quit</span>
         </div>
       </div>
-      <div className="screenshot-caption">
-        <div>
-          <span>02</span>
-          <strong>Menu bar control</strong>
-        </div>
-        <p>Check and control every server without changing windows.</p>
-      </div>
+      <figcaption>
+        <strong>Menu bar</strong>
+        <span>
+          Start, stop, and check every server without leaving the app you are
+          in.
+        </span>
+      </figcaption>
     </figure>
   );
 }
 
-function ConflictPreview() {
+function TakeoverCard() {
   return (
-    <figure className="mini-shot conflict-shot">
-      <figcaption className="sr-only">
-        Portly detects a process running outside its supervision and offers to
-        take it over.
+    <figure className="card takeover-card">
+      <div className="card-surface" aria-hidden="true">
+        <div className="takeover-banner">
+          <TriangleAlert size={15} className="takeover-icon" />
+          <div className="takeover-text">
+            <strong>Running outside Portly</strong>
+            <span>node (pid 91724) is using port 3001.</span>
+          </div>
+          <div className="takeover-actions">
+            <span>Stop process</span>
+            <span>Move to Portly</span>
+          </div>
+        </div>
+
+        <div className="takeover-under">
+          <p className="takeover-under-title">
+            <TerminalIcon size={22} strokeWidth={1.4} />
+            Server is stopped
+          </p>
+          <p className="takeover-under-body">
+            Start dev to see its live terminal output.
+          </p>
+          <span className="takeover-start" aria-hidden="true">
+            <Play size={11} fill="currentColor" strokeWidth={0} />
+            Start
+          </span>
+        </div>
+      </div>
+      <figcaption>
+        <strong>Explicit takeover</strong>
+        <span>
+          You see who owns the port before anything is stopped. Nothing is
+          killed silently.
+        </span>
       </figcaption>
-      <div className="mini-shot-surface">
-        <div className="conflict-icon">!</div>
-        <div className="conflict-copy">
-          <strong>Running outside Portly</strong>
-          <span>node (pid 91724) is using port 3000.</span>
-        </div>
-        <div className="conflict-actions">
-          <button type="button">Stop process</button>
-          <button type="button" className="conflict-primary">
-            Move to Portly
-          </button>
-        </div>
-      </div>
-      <div className="screenshot-caption">
-        <div>
-          <span>03</span>
-          <strong>Explicit port takeover</strong>
-        </div>
-        <p>
-          See the owner first. Move it under supervision only when you choose.
-        </p>
-      </div>
     </figure>
   );
 }
@@ -551,27 +459,30 @@ function ConflictPreview() {
 function SiteFooter() {
   return (
     <footer className="site-footer">
-      <div className="footer-brand">
-        <PortlyMark size={28} />
-        <span>
-          <strong>Portly</strong>
-          <small>Local servers, under control.</small>
-        </span>
+      <div className="footer-inner">
+        <div className="footer-brand">
+          <PortlyMark size={28} />
+          <div>
+            <strong>Portly</strong>
+            <span>Local servers, under control.</span>
+          </div>
+        </div>
+        <nav aria-label="Footer">
+          <a href={repoUrl}>Source</a>
+          <a href={`${repoUrl}/releases`}>Releases</a>
+          <a href={`${repoUrl}/blob/main/SECURITY.md`}>Security</a>
+          <a href={`${repoUrl}/blob/main/CONTRIBUTING.md`}>Contributing</a>
+          <a href={`${repoUrl}/blob/main/LICENSE`}>MIT</a>
+        </nav>
+        <p>
+          Built by <a href="https://melvynx.com">Melvynx</a>
+        </p>
       </div>
-      <div className="footer-links">
-        <a href={repoUrl}>Source</a>
-        <a href={`${repoUrl}/releases`}>Releases</a>
-        <a href={`${repoUrl}/blob/main/SECURITY.md`}>Security</a>
-        <a href={`${repoUrl}/blob/main/LICENSE`}>MIT License</a>
-      </div>
-      <p>
-        Built by <a href="https://melvynx.com">Melvynx</a>.
-      </p>
     </footer>
   );
 }
 
-function GithubLogo({ size }: { size: number }) {
+function GithubMark({ size }: { size: number }) {
   return (
     <svg
       aria-hidden="true"

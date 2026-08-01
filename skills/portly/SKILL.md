@@ -1,6 +1,6 @@
 ---
 name: portly
-description: Manage persistent local development servers with the Portly macOS app and CLI. Use whenever an agent would otherwise launch a long-lived dev server or needs to inspect logs and state, register or configure projects and commands, start, stop, restart, or adopt servers, resolve local port conflicts, open Portly, or safely quit the supervisor.
+description: Manage persistent local dev servers with the Portly macOS app and CLI. Use when an agent needs to start, stop, restart, inspect logs or health, configure projects and ports, adopt external listeners, resolve port conflicts, or enable launch at login.
 ---
 
 # Portly
@@ -22,6 +22,7 @@ Run `portly status --json`. Use an exact server ID or `project/server` when name
 | `take-over`, `adopt` | Move an external listener under Portly |
 | `port`, `kill-port` | Inspect or explicitly stop a port occupant |
 | `open`, `quit`, `config` | Control the app or read its configuration |
+| `forever enable\|status\|disable` | Manage launch at login through the macOS LaunchAgent |
 
 Run `portly <command> --help` for exact flags. Prefer `--json`; `config` prints JSON or a path directly.
 
@@ -57,3 +58,9 @@ Keep proof distinct: `status` proves Portly state, `logs` proves captured child 
 - Quit: `portly quit --json`.
 
 Removing a project stops its servers. Quitting stops every managed server because Portly is the supervisor. The source of truth is `~/.config/portly/config.json`, hot-reloaded by the app; logs are in `~/.config/portly/logs/`.
+
+## macOS forever mode
+
+Use `portly forever enable --json` when Portly itself must launch at every macOS login. The command transfers currently active servers to the launchd-owned app. Verify both `portly forever status --json` and `portly status --json`; launchd state alone does not prove a managed server or its meaningful route works.
+
+Use `portly forever disable --json` to unload the LaunchAgent recoverably while keeping currently active servers under a regular Portly launch. This mode is macOS-only. A Linux host needs a separate headless daemon; do not attempt to install the SwiftUI/AppKit application there.

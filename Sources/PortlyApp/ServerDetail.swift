@@ -18,8 +18,12 @@ struct ServerDetail: View {
                 conflictBanner(conflict)
                 Divider()
             }
-            TerminalPane(runtime: runtime)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if runtime.state == .stopped {
+                stoppedState
+            } else {
+                TerminalPane(runtime: runtime)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
         .toolbar {
             ToolbarItemGroup {
@@ -42,8 +46,10 @@ struct ServerDetail: View {
                     .help("Open \(url)")
                 }
 
-                Button { runtime.clearTerminal() } label: { Label("Clear", systemImage: "eraser") }
-                    .help("Clear the terminal")
+                if runtime.state != .stopped {
+                    Button { runtime.clearTerminal() } label: { Label("Clear", systemImage: "eraser") }
+                        .help("Clear the terminal")
+                }
 
                 Button(action: onEdit) { Label("Edit", systemImage: "slider.horizontal.3") }
                     .help("Edit this server")
@@ -55,15 +61,34 @@ struct ServerDetail: View {
         .onChange(of: runtime.state) { refreshConflict() }
     }
 
+    private var stoppedState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "terminal")
+                .font(.system(size: 32, weight: .light))
+                .foregroundStyle(.tertiary)
+
+            VStack(spacing: 4) {
+                Text("Server is stopped")
+                    .font(PortlyTypography.title)
+                Text("Start \(runtime.config.name) to see its live terminal output.")
+                    .font(PortlyTypography.body)
+                    .foregroundStyle(.secondary)
+            }
+
+            Button("Start", systemImage: "play.fill") {
+                runtime.start()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     // MARK: - Info bar
 
     private var infoBar: some View {
-        HStack(spacing: 14) {
-            HStack(spacing: 6) {
-                StatusDot(state: runtime.state, size: 9)
-                Text(runtime.state.label)
-                    .font(.system(size: 12, weight: .medium))
-            }
+        HStack(spacing: 8) {
+            StatusBadge(state: runtime.state)
 
             if let pid = runtime.pid {
                 metric("PID", String(pid))
@@ -88,19 +113,31 @@ struct ServerDetail: View {
                     .help(error)
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.bar)
+        .background(.regularMaterial)
     }
 
     private func metric(_ label: String, _ value: String) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             Text(label)
-                .font(.system(size: 11))
+                .font(PortlyTypography.label)
                 .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .tracking(0.45)
             Text(value)
-                .font(.system(size: 11, design: .monospaced))
+                .font(PortlyTypography.metric)
                 .monospacedDigit()
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 26)
+        .background {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Color.primary.opacity(0.045))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.75)
         }
     }
 

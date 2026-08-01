@@ -110,7 +110,17 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
         if let terminal { return terminal }
         let view = TerminalView(frame: CGRect(x: 0, y: 0, width: 800, height: 480))
         view.terminalDelegate = self
-        view.configureNativeColors()
+        view.font = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
+        view.nativeForegroundColor = NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor(srgbRed: 0.88, green: 0.9, blue: 0.92, alpha: 1)
+                : NSColor(srgbRed: 0.16, green: 0.18, blue: 0.21, alpha: 1)
+        }
+        view.nativeBackgroundColor = NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor(srgbRed: 0.055, green: 0.065, blue: 0.08, alpha: 1)
+                : NSColor(srgbRed: 0.975, green: 0.98, blue: 0.985, alpha: 1)
+        }
         terminal = view
         return view
     }
@@ -118,11 +128,14 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
     // MARK: - Lifecycle
 
     func apply(config: ServerConfig, project: Project, settings: PortlyConfig) {
+        let healthIntervalChanged = self.settings.healthIntervalSeconds != settings.healthIntervalSeconds
         self.config = config
         self.projectID = project.id
         self.projectName = project.name
         self.projectRoot = project.root
         self.settings = settings
+        logs.updateLimits(maxLines: settings.logBufferLines, maxMB: settings.logFileMaxMB)
+        if healthIntervalChanged, isRunning { startHealthTimer() }
     }
 
     func start() {

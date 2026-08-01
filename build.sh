@@ -4,6 +4,7 @@
 #   ./build.sh            build + install to /Applications and /usr/local/bin
 #   ./build.sh --no-install   build only, leaves the bundle in ./dist
 #   ./build.sh --run          build, install, and relaunch the app
+#   ./build.sh --forever      build, install, and enable launch at login
 
 set -euo pipefail
 
@@ -12,11 +13,14 @@ DIST="$ROOT/dist"
 APP="$DIST/Portly.app"
 INSTALL=1
 RUN=0
+FOREVER=0
+RUNNING_SERVERS=()
 
 for arg in "$@"; do
   case "$arg" in
     --no-install) INSTALL=0 ;;
     --run) RUN=1 ;;
+    --forever) FOREVER=1 ;;
     *) echo "Unknown flag: $arg" >&2; exit 1 ;;
   esac
 done
@@ -92,6 +96,11 @@ codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || echo "    ad-hoc sign
 if [ "$INSTALL" -eq 1 ]; then
   echo "==> Installing"
   if pgrep -x Portly >/dev/null 2>&1; then
+    if command -v portly >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+      while IFS= read -r server_id; do
+        [ -n "$server_id" ] && RUNNING_SERVERS+=("$server_id")
+      done < <(portly status --json 2>/dev/null | jq -r '.projects[].servers[] | select(.state != "stopped" and .state != "failed") | .id')
+    fi
     echo "    quitting the running Portly (this stops your servers)"
     if command -v portly >/dev/null 2>&1; then
       portly quit >/dev/null 2>&1 || true
@@ -129,11 +138,34 @@ if [ "$INSTALL" -eq 1 ]; then
     echo "    no writable bin directory found, run:"
     echo "      sudo cp '$BIN_DIR/portly' /usr/local/bin/portly"
   fi
+
+  SKILL_TARGET="$HOME/.agents/skills/portly"
+  mkdir -p "$HOME/.agents/skills"
+  if [ -e "$SKILL_TARGET" ] || [ -L "$SKILL_TARGET" ]; then
+    trash "$SKILL_TARGET"
+  fi
+  cp -R "$ROOT/skills/portly" "$SKILL_TARGET"
+  echo "    $SKILL_TARGET"
 fi
 
-if [ "$RUN" -eq 1 ]; then
+if [ "$FOREVER" -eq 1 ]; then
+  if [ "$INSTALL" -ne 1 ]; then
+    echo "    --forever requires installation; remove --no-install" >&2
+    exit 1
+  fi
+  echo "==> Enabling launch at login"
+  portly forever enable
+elif [ "$RUN" -eq 1 ]; then
   echo "==> Launching"
   open /Applications/Portly.app
+fi
+
+if { [ "$FOREVER" -eq 1 ] || [ "$RUN" -eq 1 ]; } && [ "${#RUNNING_SERVERS[@]}" -gt 0 ]; then
+  echo "==> Restoring active servers"
+  for server_id in "${RUNNING_SERVERS[@]}"; do
+    portly start "$server_id" --json >/dev/null
+    echo "    $server_id"
+  done
 fi
 
 echo "Done."

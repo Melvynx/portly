@@ -10,7 +10,16 @@ Portly requires macOS 14 or newer and Swift 6.
 ./build.sh --run
 ```
 
-This builds and ad-hoc signs `Portly.app`, installs it in `/Applications`, installs `portly` in the first writable bin directory on `PATH`, and launches the app. Reinstalling quits the running app first, which stops every server supervised by Portly.
+This builds and ad-hoc signs `Portly.app`, installs it in `/Applications`, installs `portly` in the first writable bin directory on `PATH`, installs the bundled skill in `~/.agents/skills/portly`, and launches the app. Reinstalling quits the running app first, which stops every server supervised by Portly.
+
+To launch Portly automatically at every macOS login, use:
+
+```bash
+./build.sh --forever
+portly forever status --json
+```
+
+`portly forever enable` preserves and restarts the servers that were active during the handoff to `launchd`. `portly forever disable` removes the LaunchAgent recoverably and leaves active servers running under a regular Portly launch. This mode supervises the macOS app; Linux requires a separate headless daemon because SwiftUI/AppKit cannot run there.
 
 Use `./build.sh --no-install` to assemble `dist/Portly.app` without installing it.
 
@@ -42,7 +51,7 @@ portly take-over codelynx/web --json
 portly stop --project codelynx --json
 ```
 
-Other commands are `start`, `stop`, `restart`, `take-over` (`adopt`), `update-server`, `remove`, `port`, `kill-port`, `open`, `quit`, and `config`. `take-over` stops an external listener on the configured port and relaunches the server under Portly. Run `portly <command> --help` for exact flags. `quit` stops every managed server because the app is the supervisor.
+Other commands are `start`, `stop`, `restart`, `take-over` (`adopt`), `update-server`, `remove`, `port`, `kill-port`, `open`, `quit`, `forever`, and `config`. `take-over` stops an external listener on the configured port and relaunches the server under Portly. `forever` manages the per-user macOS LaunchAgent. Run `portly <command> --help` for exact flags. `quit` stops every managed server because the app is the supervisor.
 
 ## Configuration
 
@@ -105,4 +114,4 @@ Responses are JSON envelopes with `ok`, `data`, and `error` fields. The CLI is t
 
 ## Agent skill
 
-The distributable skill is in [`skills/portly`](skills/portly). Copy that folder into an agent's skill directory, or use the workspace copy at `~/cc/.agents/skills/portly`.
+The distributable skill is in [`skills/portly`](skills/portly). The installer copies it to the canonical personal root at `~/.agents/skills/portly`, which is shared by Codex and Cursor and exposed to Claude through the standard `~/.claude/skills` compatibility link.

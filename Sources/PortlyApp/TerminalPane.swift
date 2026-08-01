@@ -26,12 +26,16 @@ struct TerminalPane: NSViewRepresentable {
             guard current !== view else { return }
             current?.removeFromSuperview()
             view.translatesAutoresizingMaskIntoConstraints = false
+            view.wantsLayer = true
+            view.layer?.cornerRadius = 10
+            view.layer?.cornerCurve = .continuous
+            view.layer?.masksToBounds = true
             addSubview(view)
             NSLayoutConstraint.activate([
-                view.leadingAnchor.constraint(equalTo: leadingAnchor),
-                view.trailingAnchor.constraint(equalTo: trailingAnchor),
-                view.topAnchor.constraint(equalTo: topAnchor),
-                view.bottomAnchor.constraint(equalTo: bottomAnchor),
+                view.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+                view.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+                view.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+                view.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
             ])
             current = view
             window?.makeFirstResponder(view)

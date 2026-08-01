@@ -4,11 +4,13 @@ import SwiftUI
 
 struct MainView: View {
     enum Selection: Hashable {
+        case ports
         case project(String)
         case server(String)
     }
 
     @EnvironmentObject private var supervisor: Supervisor
+    @Environment(\.openWindow) private var openWindow
     @ObservedObject private var appSelection = AppSelection.shared
     @State private var selection: Selection?
     @State private var editingProject: Project?
@@ -22,7 +24,10 @@ struct MainView: View {
         } detail: {
             detail
         }
-        .onAppear(perform: applyPendingSelection)
+        .onAppear {
+            WindowOpener.opener = { openWindow(id: WindowOpener.mainWindowID) }
+            applyPendingSelection()
+        }
         .onChange(of: appSelection.pending) { applyPendingSelection() }
         .sheet(isPresented: $addingProject) {
             ProjectForm(project: nil) { name, root, icon, color in
@@ -50,13 +55,14 @@ struct MainView: View {
                 }
             }
         }
+        .font(PortlyTypography.body)
     }
 
     // MARK: - Sidebar
 
     private var sidebar: some View {
         List(selection: $selection) {
-            ForEach(supervisor.projects) { project in
+            ForEach(sidebarProjects) { project in
                 Section {
                     ProjectHeader(project: project)
                         .tag(Selection.project(project.id))
@@ -74,21 +80,65 @@ struct MainView: View {
             }
         }
         .listStyle(.sidebar)
-        .safeAreaInset(edge: .bottom) {
-            HStack(spacing: 6) {
-                Button {
-                    addingProject = true
-                } label: {
-                    Label("Add Project", systemImage: "plus")
-                        .font(.system(size: 12))
+        .safeAreaInset(edge: .bottom) { sidebarActions }
+    }
+
+    private var sidebarProjects: [Project] {
+        supervisor.projects.enumerated()
+            .sorted { lhs, rhs in
+                let lhsIsRunning = projectIsRunning(lhs.element)
+                let rhsIsRunning = projectIsRunning(rhs.element)
+
+                if lhsIsRunning != rhsIsRunning {
+                    return lhsIsRunning
                 }
-                .buttonStyle(.borderless)
-                Spacer()
+
+                return lhs.offset < rhs.offset
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(.bar)
+            .map(\.element)
+    }
+
+    private func projectIsRunning(_ project: Project) -> Bool {
+        project.servers.contains { server in
+            supervisor.runtime(for: server.id)?.isRunning == true
         }
+    }
+
+    private var sidebarActions: some View {
+        VStack(spacing: 6) {
+            Button {
+                addingProject = true
+            } label: {
+                Label("Add Project", systemImage: "plus")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+
+            Button {
+                selection = .ports
+            } label: {
+                HStack {
+                    Label("View Ports", systemImage: "network")
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(selection == .ports ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.055))
+            }
+            .accessibilityHint("Shows every listening TCP port on this Mac")
+        }
+        .font(PortlyTypography.bodyMedium)
+        .padding(10)
+        .background(.bar)
     }
 
     @ViewBuilder
@@ -133,6 +183,8 @@ struct MainView: View {
     @ViewBuilder
     private var detail: some View {
         switch selection {
+        case .ports:
+            PortsView()
         case .server(let id):
             if let runtime = supervisor.runtime(for: id) {
                 ServerDetail(runtime: runtime) {
@@ -194,15 +246,20 @@ private struct ProjectHeader: View {
     let project: Project
 
     var body: some View {
-        HStack(spacing: 6) {
-            // The tinted symbol already carries the project color, so there is
-            // no separate accent dot fighting the sidebar's trailing edge.
+        HStack(spacing: 8) {
             Image(systemName: project.icon)
+                .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(Color(hex: project.color))
-                .frame(width: 14)
+                .frame(width: 20, height: 20)
+                .background {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color(hex: project.color).opacity(0.12))
+                }
             Text(project.name)
+                .font(PortlyTypography.project)
             Spacer()
         }
+        .padding(.vertical, 2)
     }
 }
 
@@ -214,17 +271,18 @@ private struct ServerRow: View {
             StatusDot(state: runtime.state)
             VStack(alignment: .leading, spacing: 1) {
                 Text(runtime.config.name)
+                    .font(PortlyTypography.bodyMedium)
                     .lineLimit(1)
                 if let port = runtime.config.port {
                     Text("localhost:\(String(port))")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(PortlyTypography.metadata)
                         .foregroundStyle(.secondary)
                 }
             }
             Spacer()
             if let startedAt = runtime.startedAt, runtime.isRunning {
                 Text(startedAt.compactUptime)
-                    .font(.system(size: 10))
+                    .font(PortlyTypography.metadata)
                     .foregroundStyle(.tertiary)
                     .monospacedDigit()
             }
@@ -251,9 +309,10 @@ private struct ProjectDetail: View {
                     .foregroundStyle(Color(hex: project.color))
                     .frame(width: 30)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(project.name).font(.system(size: 16, weight: .semibold))
+                    Text(project.name)
+                        .font(PortlyTypography.title)
                     Text(NSString(string: project.root).abbreviatingWithTildeInPath)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(PortlyTypography.metadata)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
@@ -318,15 +377,16 @@ private struct ProjectServerRow: View {
         HStack(spacing: 10) {
             StatusDot(state: runtime.state)
             VStack(alignment: .leading, spacing: 2) {
-                Text(runtime.config.name).font(.system(size: 13, weight: .medium))
+                Text(runtime.config.name)
+                    .font(PortlyTypography.bodyMedium)
                 Text(runtime.config.command)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(PortlyTypography.metadata)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
             Spacer()
             Text(runtime.state.label)
-                .font(.system(size: 11))
+                .font(PortlyTypography.label)
                 .foregroundStyle(.secondary)
             if runtime.isRunning {
                 Button { runtime.stop() } label: { Image(systemName: "stop.fill") }

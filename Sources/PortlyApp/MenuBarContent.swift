@@ -7,6 +7,9 @@ import SwiftUI
 struct MenuBarContent: View {
     @EnvironmentObject private var supervisor: Supervisor
     @Environment(\.openWindow) private var openWindow
+    @State private var listHeight: CGFloat = 0
+
+    private static let maxListHeight: CGFloat = 420
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -17,6 +20,9 @@ struct MenuBarContent: View {
             if supervisor.projects.isEmpty {
                 emptyState
             } else {
+                // A menu bar window sizes itself to the content's fitting size, and
+                // a ScrollView reports none, so it would collapse to nothing. Measure
+                // the list and give the scroller an explicit height.
                 ScrollView {
                     VStack(alignment: .leading, spacing: 2) {
                         ForEach(supervisor.projects) { project in
@@ -24,8 +30,17 @@ struct MenuBarContent: View {
                         }
                     }
                     .padding(.vertical, 6)
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: ListHeightKey.self,
+                                value: proxy.size.height
+                            )
+                        }
+                    )
                 }
-                .frame(maxHeight: 420)
+                .frame(height: min(max(listHeight, estimatedListHeight), Self.maxListHeight))
+                .onPreferenceChange(ListHeightKey.self) { listHeight = $0 }
             }
 
             Divider()
@@ -35,6 +50,13 @@ struct MenuBarContent: View {
         .onAppear {
             WindowOpener.opener = { openWindow(id: WindowOpener.mainWindowID) }
         }
+    }
+
+    /// Fallback used before the list has been measured, so the popover never
+    /// opens empty: roughly one 22pt row per project header and per server.
+    private var estimatedListHeight: CGFloat {
+        let rows = supervisor.projects.reduce(0) { $0 + 1 + $1.servers.count }
+        return CGFloat(rows) * 22 + 12
     }
 
     // MARK: - Sections
@@ -115,6 +137,12 @@ struct MenuBarContent: View {
             }
             .buttonStyle(.borderless)
 
+            Button("Ports") {
+                AppSelection.shared.pending = .ports
+                WindowOpener.openMainWindow()
+            }
+            .buttonStyle(.borderless)
+
             Spacer()
 
             Button("Stop All") {
@@ -185,6 +213,14 @@ private struct MenuBarServerRow: View {
             AppSelection.shared.pending = .server(runtime.id)
             WindowOpener.openMainWindow()
         }
+    }
+}
+
+/// Carries the measured height of the project list out of the ScrollView.
+private struct ListHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 

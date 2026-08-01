@@ -1,4 +1,5 @@
 import ArgumentParser
+import Darwin
 import Foundation
 import PortlyCore
 
@@ -82,7 +83,7 @@ struct Portly: ParsableCommand {
         subcommands: [
             Status.self, Start.self, Stop.self, Restart.self, Logs.self,
             AddProject.self, AddServer.self, UpdateServer.self,
-            Remove.self, TakeOver.self, Port.self, KillPort.self, Open.self, Quit.self, Config.self,
+            Remove.self, TakeOver.self, Port.self, KillPort.self, Open.self, Quit.self, Forever.self, Config.self,
         ],
         defaultSubcommand: Status.self
     )
@@ -448,6 +449,231 @@ struct Quit: ParsableCommand {
             emit(response, json: options.json) { $0.message }
         } catch {
             fail(error.localizedDescription)
+        }
+    }
+}
+
+// MARK: - macOS persistence
+
+private struct ForeverState: Codable {
+    let enabled: Bool
+    let loaded: Bool
+    let label: String
+    let plist: String
+    let appExecutable: String
+}
+
+private enum ForeverManager {
+    static let label = "dev.portly.forever"
+
+    static var domain: String { "gui/\(getuid())" }
+    static var service: String { "\(domain)/\(label)" }
+    static var plistURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/\(label).plist")
+    }
+    static let appExecutable = "/Applications/Portly.app/Contents/MacOS/Portly"
+
+    static func state() -> ForeverState {
+        ForeverState(
+            enabled: FileManager.default.fileExists(atPath: plistURL.path),
+            loaded: launchctl(["print", service]).status == 0,
+            label: label,
+            plist: plistURL.path,
+            appExecutable: appExecutable
+        )
+    }
+
+    static func enable(options: GlobalOptions) throws -> ForeverState {
+        guard FileManager.default.isExecutableFile(atPath: appExecutable) else {
+            throw ValidationError("Install /Applications/Portly.app first with ./build.sh --run.")
+        }
+
+        let activeServers = try stopCurrentApp(options: options)
+        _ = launchctl(["bootout", service])
+
+        let fm = FileManager.default
+        try fm.createDirectory(at: plistURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: PortlyPaths.logsDirectory, withIntermediateDirectories: true)
+
+        let plist: [String: Any] = [
+            "Label": label,
+            "ProgramArguments": [appExecutable],
+            "RunAtLoad": true,
+            "ProcessType": "Interactive",
+            "LimitLoadToSessionType": "Aqua",
+            "StandardOutPath": PortlyPaths.logsDirectory.appendingPathComponent("portly-launchd.log").path,
+            "StandardErrorPath": PortlyPaths.logsDirectory.appendingPathComponent("portly-launchd-error.log").path,
+        ]
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try data.write(to: plistURL, options: .atomic)
+
+        let bootstrap = launchctl(["bootstrap", domain, plistURL.path])
+        guard bootstrap.status == 0 else {
+            throw ValidationError("launchctl bootstrap failed: \(bootstrap.output)")
+        }
+        guard waitForAPI(options: options) else {
+            throw ValidationError("launchd loaded Portly, but its control API did not become reachable.")
+        }
+        try restore(activeServers, options: options)
+        return state()
+    }
+
+    static func disable(options: GlobalOptions) throws -> ForeverState {
+        let activeServers = try stopCurrentApp(options: options)
+        _ = launchctl(["bootout", service])
+        try movePlistToTrashIfPresent()
+
+        if !activeServers.isEmpty {
+            let c = client(options)
+            guard c.launchAppIfNeeded(), waitForAPI(options: options) else {
+                throw ValidationError("Launch at login was disabled, but Portly could not be relaunched.")
+            }
+            try restore(activeServers, options: options)
+        }
+        return state()
+    }
+
+    private static func stopCurrentApp(options: GlobalOptions) throws -> [String] {
+        let c = client(options)
+        var active: [String] = []
+
+        if c.isReachable() {
+            let status = try c.get("status", as: PortlyStatus.self)
+            active = status.projects.flatMap(\.servers).filter {
+                $0.state != .stopped && $0.state != .failed
+            }.map(\.id)
+
+            _ = try c.request(
+                "POST", "quit", body: PortlyAPI.Empty(),
+                as: PortlyAPI.ActionResponse.self, autoLaunch: false
+            )
+            let deadline = Date().addingTimeInterval(10)
+            while Date() < deadline, c.isReachable(timeout: 0.3) {
+                Thread.sleep(forTimeInterval: 0.2)
+            }
+        }
+
+        // LaunchServices can retain a development bundle with the same bundle ID.
+        // Ensure no dist/debug copy can race the launchd-owned installed app for 7737.
+        terminateOtherAppInstances()
+        return active
+    }
+
+    private static func terminateOtherAppInstances() {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        process.arguments = [
+            "-U", String(getuid()), "-f",
+            #"/Portly\.app/Contents/MacOS/Portly$"#,
+        ]
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        guard (try? process.run()) != nil else { return }
+        process.waitUntilExit()
+        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        let pids = output.split(whereSeparator: \.isWhitespace).compactMap { Int32($0) }
+        guard !pids.isEmpty else { return }
+
+        pids.forEach { _ = kill($0, SIGTERM) }
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline, pids.contains(where: { kill($0, 0) == 0 }) {
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        pids.filter { kill($0, 0) == 0 }.forEach { _ = kill($0, SIGKILL) }
+    }
+
+    private static func waitForAPI(options: GlobalOptions) -> Bool {
+        let c = client(options)
+        let deadline = Date().addingTimeInterval(20)
+        while Date() < deadline {
+            if c.isReachable(timeout: 0.5) { return true }
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+        return false
+    }
+
+    private static func restore(_ serverIDs: [String], options: GlobalOptions) throws {
+        let c = client(options)
+        for id in serverIDs {
+            let body = PortlyAPI.TargetRequest(server: id)
+            _ = try c.post("start", body, as: PortlyAPI.ActionResponse.self)
+        }
+    }
+
+    private static func movePlistToTrashIfPresent() throws {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: plistURL.path) else { return }
+        let trash = fm.homeDirectoryForCurrentUser.appendingPathComponent(".Trash", isDirectory: true)
+        try fm.createDirectory(at: trash, withIntermediateDirectories: true)
+        let stamp = Int(Date().timeIntervalSince1970)
+        let destination = trash.appendingPathComponent("\(label)-\(stamp).plist")
+        try fm.moveItem(at: plistURL, to: destination)
+    }
+
+    private static func launchctl(_ arguments: [String]) -> (status: Int32, output: String) {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        process.arguments = arguments
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return (1, error.localizedDescription)
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        return (
+            process.terminationStatus,
+            String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+}
+
+struct Forever: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Keep Portly available across macOS logins.",
+        subcommands: [Enable.self, Disable.self, ForeverStatus.self],
+        defaultSubcommand: ForeverStatus.self
+    )
+
+    struct Enable: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Install and load the Portly LaunchAgent.")
+        @OptionGroup var options: GlobalOptions
+
+        func run() throws {
+            let state = try ForeverManager.enable(options: options)
+            emit(state, json: options.json) { _ in
+                "Portly will launch at login and is now supervised by launchd."
+            }
+        }
+    }
+
+    struct Disable: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Unload the Portly LaunchAgent.")
+        @OptionGroup var options: GlobalOptions
+
+        func run() throws {
+            let state = try ForeverManager.disable(options: options)
+            emit(state, json: options.json) { _ in "Portly launch at login is disabled." }
+        }
+    }
+
+    struct ForeverStatus: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "status",
+            abstract: "Show LaunchAgent installation and live state."
+        )
+        @OptionGroup var options: GlobalOptions
+
+        func run() throws {
+            let state = ForeverManager.state()
+            emit(state, json: options.json) {
+                "Launch at login: \($0.enabled ? "enabled" : "disabled") (launchd \($0.loaded ? "loaded" : "not loaded"))"
+            }
         }
     }
 }

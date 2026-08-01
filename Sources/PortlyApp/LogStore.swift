@@ -6,8 +6,8 @@ import PortlyCore
 /// side deliberately strips ANSI so `portly logs` output is readable by an agent.
 final class LogStore {
     private let serverID: String
-    private let maxLines: Int
-    private let maxBytes: Int
+    private var maxLines: Int
+    private var maxBytes: Int
     private let queue: DispatchQueue
 
     private var lines: [String] = []
@@ -81,6 +81,17 @@ final class LogStore {
         queue.async {
             self.lines.removeAll()
             self.partial.removeAll()
+        }
+    }
+
+    func updateLimits(maxLines: Int, maxMB: Int) {
+        queue.async {
+            self.maxLines = max(100, maxLines)
+            self.maxBytes = max(1, maxMB) * 1_000_000
+            if self.lines.count > self.maxLines {
+                self.lines.removeFirst(self.lines.count - self.maxLines)
+            }
+            if self.bytesWritten > self.maxBytes { self.rotate() }
         }
     }
 
