@@ -18,13 +18,12 @@ targets:
     platform: macOS
     sources:
       - path: Sources
-    resources:
       - path: Resources/Portly.icns
     settings:
       base:
         CODE_SIGN_ENTITLEMENTS: Resources/PortlyCompanion.entitlements
         CODE_SIGN_STYLE: Automatic
-        CURRENT_PROJECT_VERSION: 1
+        CURRENT_PROJECT_VERSION: 2
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Resources/Info.plist
         MARKETING_VERSION: 1.0.0

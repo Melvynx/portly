@@ -10,6 +10,7 @@
 		6D36C4983C1F321D0A05AF7E /* PortlyServiceClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D72888852A55FCA7F7897177 /* PortlyServiceClientTests.swift */; };
 		753E811373C5A052430A46E7 /* PortlyServiceClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8ED2DD1E3A1F324B1856F0AB /* PortlyServiceClient.swift */; };
 		BC2B47B1493BBCA610FBCE3F /* PortlyCompanionApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D56CEFDCD2F23490ADE6924D /* PortlyCompanionApp.swift */; };
+		C920A674D7DE9CEA541D56B5 /* Portly.icns in Resources */ = {isa = PBXBuildFile; fileRef = BC9226D4FC18A44E1617FE2B /* Portly.icns */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -26,6 +27,7 @@
 		77A0D54B627098E286FA3BF0 /* PortlyCompanionTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PortlyCompanionTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		7971B79D297F08A14A80CEFB /* PortlyCompanion.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PortlyCompanion.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8ED2DD1E3A1F324B1856F0AB /* PortlyServiceClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortlyServiceClient.swift; sourceTree = "<group>"; };
+		BC9226D4FC18A44E1617FE2B /* Portly.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Portly.icns; sourceTree = "<group>"; };
 		D56CEFDCD2F23490ADE6924D /* PortlyCompanionApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortlyCompanionApp.swift; sourceTree = "<group>"; };
 		D72888852A55FCA7F7897177 /* PortlyServiceClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortlyServiceClientTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -51,6 +53,7 @@
 		46B3F40984DC724A802339C9 = {
 			isa = PBXGroup;
 			children = (
+				B393CEB16120B2719F8456DB /* Resources */,
 				49E69FB98DBCE5EC65562510 /* Sources */,
 				440826FDA62A5EE80D3B14F6 /* Tests */,
 				140CDD26C0F4DB639752F524 /* Products */,
@@ -66,6 +69,14 @@
 			path = Sources;
 			sourceTree = "<group>";
 		};
+		B393CEB16120B2719F8456DB /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				BC9226D4FC18A44E1617FE2B /* Portly.icns */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -74,6 +85,7 @@
 			buildConfigurationList = 3FC3B5B9F745F41D5357E59B /* Build configuration list for PBXNativeTarget "PortlyCompanion" */;
 			buildPhases = (
 				78F10019910D370818C3A273 /* Sources */,
+				A5D309AE21B8581DE3839CFC /* Resources */,
 			);
 			buildRules = (
 			);
@@ -141,6 +153,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A5D309AE21B8581DE3839CFC /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C920A674D7DE9CEA541D56B5 /* Portly.icns in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		78F10019910D370818C3A273 /* Sources */ = {
@@ -260,7 +283,7 @@
 				CODE_SIGN_ENTITLEMENTS = Resources/PortlyCompanion.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -282,7 +305,7 @@
 				CODE_SIGN_ENTITLEMENTS = Resources/PortlyCompanion.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
