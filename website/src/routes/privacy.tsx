@@ -69,8 +69,8 @@ function PrivacyPolicy() {
         <p>
           Portly Companion is sandboxed and does not read project files. The
           separately installed Portly service may keep its configuration and
-          server logs locally on your Mac. Those files are controlled by you
-          and are not uploaded by Portly Companion.
+          server logs locally on your Mac. Those files are controlled by you and
+          are not uploaded by Portly Companion.
         </p>
       </section>
 

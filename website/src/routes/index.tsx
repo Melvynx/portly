@@ -22,6 +22,7 @@ import { useReveal } from "../components/use-reveal";
 
 const repoUrl = "https://github.com/Melvynx/portly";
 const downloadUrl = `${repoUrl}/releases/latest/download/Portly-macOS.zip`;
+declare const __PORTLY_VERSION__: string;
 /* Must be paste-and-run: same three steps the install block below prints. */
 const installCommand = `git clone ${repoUrl}.git && cd portly && ./build.sh --run`;
 
@@ -99,7 +100,7 @@ function LandingPage() {
     operatingSystem: "macOS 14 or newer",
     url: "https://portly.melvynx.dev",
     downloadUrl,
-    softwareVersion: "0.1.0",
+    softwareVersion: __PORTLY_VERSION__,
     license: "https://opensource.org/license/mit",
     codeRepository: repoUrl,
     description:
@@ -118,8 +119,7 @@ function LandingPage() {
         <section className="hero">
           <div className="hero-copy">
             <a className="tag" href={`${repoUrl}/releases`}>
-              <i className="dot dot-live" />
-              v0.1.0 for macOS 14+
+              <i className="dot dot-live" />v{__PORTLY_VERSION__} for macOS 14+
               <ChevronRight size={13} aria-hidden="true" />
             </a>
             <h1>Your agents keep starting the same server.</h1>
