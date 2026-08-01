@@ -155,10 +155,38 @@ final class Supervisor: ObservableObject {
               let state = try? JSONDecoder().decode(UpdaterRelaunchState.self, from: data)
         else { return }
 
-        // Consume before starting anything so a crash cannot create an endless
-        // restart loop on every future manual launch.
-        try? FileManager.default.removeItem(at: url)
-        state.serverIDs.forEach { runtimes[$0]?.start() }
+        resumeAfterUpdaterRelaunch(serverIDs: state.serverIDs, attemptsRemaining: 50)
+    }
+
+    private func resumeAfterUpdaterRelaunch(serverIDs: [String], attemptsRemaining: Int) {
+        var waiting: [String] = []
+
+        for id in serverIDs {
+            guard let runtime = runtimes[id], !runtime.isRunning else { continue }
+            if let port = runtime.config.port, PortInspector.isListening(port: port) {
+                waiting.append(id)
+            } else {
+                runtime.start()
+            }
+        }
+
+        guard !waiting.isEmpty, attemptsRemaining > 1 else {
+            try? FileManager.default.removeItem(at: updaterRelaunchStateURL)
+            if !waiting.isEmpty {
+                NSLog("[portly] update relaunch timed out waiting for server ports: \(waiting.joined(separator: ", "))")
+            }
+            return
+        }
+
+        // Sparkle can launch the replacement app while child process groups
+        // from the old app are still releasing their ports. Retry for up to ten
+        // seconds instead of treating that short handoff as a real conflict.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.resumeAfterUpdaterRelaunch(
+                serverIDs: waiting,
+                attemptsRemaining: attemptsRemaining - 1
+            )
+        }
     }
 
     /// Blocks briefly on quit so children get a chance to die with us.
