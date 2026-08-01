@@ -165,8 +165,11 @@ if [ "$RELEASE" -eq 1 ]; then
   if [ -n "${PORTLY_PREVIOUS_APPCAST:-}" ] && [ -f "$PORTLY_PREVIOUS_APPCAST" ]; then
     cp "$PORTLY_PREVIOUS_APPCAST" "$UPDATE_DIR/appcast.xml"
   fi
-  GENERATE_APPCAST="$(find "$ROOT/.build/artifacts" -type f -name generate_appcast -print -quit)"
+  GENERATE_APPCAST="${PORTLY_GENERATE_APPCAST:-}"
   if [ -z "$GENERATE_APPCAST" ]; then
+    GENERATE_APPCAST="$(find "$ROOT/.build/artifacts" -type f -name generate_appcast -print -quit)"
+  fi
+  if [ -z "$GENERATE_APPCAST" ] || [ ! -x "$GENERATE_APPCAST" ]; then
     echo "Sparkle's generate_appcast tool was not found." >&2
     exit 1
   fi

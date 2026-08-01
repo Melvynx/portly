@@ -37,7 +37,17 @@ trap 'trash "$RELEASE_DIR" >/dev/null 2>&1 || true' EXIT
 git -C "$ROOT" archive HEAD | tar -x -C "$SOURCE_DIR"
 gh release download --repo Melvynx/portly --pattern appcast.xml --dir "$PREVIOUS_DIR" >/dev/null 2>&1 || true
 
-PORTLY_PREVIOUS_APPCAST="$PREVIOUS_DIR/appcast.xml" "$SOURCE_DIR/build.sh" --release
+# Keep the signer path stable across releases. Keychain authorization is tied
+# to the executable, so using the freshly extracted copy from each temporary
+# source directory would ask for access on every release.
+SPARKLE_GENERATOR="$(find "$ROOT/.build/artifacts" -type f -name generate_appcast -print -quit)"
+if [ -n "$SPARKLE_GENERATOR" ]; then
+  SPARKLE_GENERATOR="$(cd "$(dirname "$SPARKLE_GENERATOR")" && pwd)/$(basename "$SPARKLE_GENERATOR")"
+fi
+
+PORTLY_PREVIOUS_APPCAST="$PREVIOUS_DIR/appcast.xml" \
+PORTLY_GENERATE_APPCAST="$SPARKLE_GENERATOR" \
+  "$SOURCE_DIR/build.sh" --release
 
 gh release create "$TAG" \
   "$SOURCE_DIR/dist/Portly-macOS.zip#Portly for macOS" \
