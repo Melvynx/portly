@@ -10,7 +10,7 @@ Portly requires macOS 14 or newer and Swift 6.
 ./build.sh --run
 ```
 
-This builds and ad-hoc signs `Portly.app`, installs it in `/Applications`, installs `portly` in the first writable bin directory on `PATH`, installs the bundled skill in `~/.agents/skills/portly`, and launches the app. Reinstalling quits the running app first, which stops every server supervised by Portly.
+This builds and ad-hoc signs `Portly.app`, installs it in `/Applications`, installs `portly` in the first writable bin directory on `PATH`, installs the bundled skill in `~/.agents/skills/portly`, adds idempotent Portly server-management rules to `~/.agents/AGENTS.md`, and launches the app. Reinstalling quits the running app first, which stops every server supervised by Portly.
 
 To launch Portly automatically at every macOS login, use:
 
@@ -115,3 +115,5 @@ Responses are JSON envelopes with `ok`, `data`, and `error` fields. The CLI is t
 ## Agent skill
 
 The distributable skill is in [`skills/portly`](skills/portly). The installer copies it to the canonical personal root at `~/.agents/skills/portly`, which is shared by Codex and Cursor and exposed to Claude through the standard `~/.claude/skills` compatibility link.
+
+The installer maintains a marker-delimited rule in `~/.agents/AGENTS.md` so agents consistently use Portly instead of spawning unmanaged servers. During project setup, the skill also requires the same rule in the repository's root `AGENTS.md`; this makes the behavior portable to collaborators and other machines. Both paths are idempotent and preserve existing instructions.

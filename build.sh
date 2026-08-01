@@ -146,6 +146,26 @@ if [ "$INSTALL" -eq 1 ]; then
   fi
   cp -R "$ROOT/skills/portly" "$SKILL_TARGET"
   echo "    $SKILL_TARGET"
+
+  AGENTS_FILE="$HOME/.agents/AGENTS.md"
+  if [ ! -f "$AGENTS_FILE" ] || ! grep -Eiq 'use[^[:alnum:]]+Portly|portly:managed-rule:start' "$AGENTS_FILE"; then
+    mkdir -p "$(dirname "$AGENTS_FILE")"
+    if [ -s "$AGENTS_FILE" ]; then
+      printf '\n' >> "$AGENTS_FILE"
+    fi
+    cat >> "$AGENTS_FILE" <<'RULE'
+<!-- portly:managed-rule:start -->
+## Development servers
+
+- Always use Portly (`portly ...`) to start, stop, restart, inspect, or keep local development servers running.
+- Start with `portly status --json`. Reuse a healthy managed server; if an in-scope server is running outside Portly, register it and use `portly take-over <project/server> --json`.
+- Never launch persistent development servers directly, in the background, or through another supervisor.
+<!-- portly:managed-rule:end -->
+RULE
+    echo "    $AGENTS_FILE (Portly rules added)"
+  else
+    echo "    $AGENTS_FILE (Portly rules already present)"
+  fi
 fi
 
 if [ "$FOREVER" -eq 1 ]; then

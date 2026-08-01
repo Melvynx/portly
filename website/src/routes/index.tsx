@@ -18,6 +18,7 @@ import { PortlyMark } from "../components/portly-mark";
 import { projects, runningSummary } from "../components/portly-state";
 import { PortsWindow } from "../components/ports-window";
 import { ProductWindow } from "../components/product-window";
+import { useReveal } from "../components/use-reveal";
 
 const repoUrl = "https://github.com/Melvynx/portly";
 const downloadUrl = `${repoUrl}/releases/latest/download/Portly-macOS.zip`;
@@ -88,6 +89,8 @@ const capabilities = [
 ];
 
 function LandingPage() {
+  useReveal();
+
   const softwareJsonLd = {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
@@ -144,8 +147,8 @@ function LandingPage() {
         </section>
 
         <ul className="facts">
-          {facts.map(([title, body]) => (
-            <li key={title}>
+          {facts.map(([title, body], index) => (
+            <li key={title} data-reveal style={{ "--i": index } as never}>
               <strong>{title}</strong>
               <span>{body}</span>
             </li>
@@ -183,7 +186,7 @@ function LandingPage() {
           lede="Portly looks and behaves like part of macOS. It is the same supervisor whether you drive it by hand, from the menu bar, or through the CLI."
         >
           <div className="tour">
-            <figure className="tour-main">
+            <figure className="tour-main" data-reveal>
               <PortsWindow />
               <figcaption>
                 <strong>Every listening port, grouped by owner</strong>
@@ -209,7 +212,7 @@ function LandingPage() {
         >
           <ul className="specs">
             {capabilities.map((item) => (
-              <li key={item.title}>
+              <li key={item.title} data-reveal>
                 <h3>{item.title}</h3>
                 <p>{item.body}</p>
                 <code>{item.detail}</code>
@@ -218,7 +221,7 @@ function LandingPage() {
           </ul>
         </Section>
 
-        <section className="install" id="install">
+        <section className="install" id="install" data-reveal>
           <div className="install-copy">
             <p className="kicker">Install</p>
             <h2>Two lines, then it is yours.</h2>
@@ -239,19 +242,23 @@ function LandingPage() {
             </div>
           </div>
 
+          {/* --i is the print order, not the DOM order: both commands land
+              together, then the three results report one after the other. */}
           <pre className="install-shell" aria-label="Install commands">
-            <span>
+            <span style={{ "--i": 0 } as never}>
               <b>$</b> git clone {repoUrl}.git{"\n"}
             </span>
-            <span>
+            <span style={{ "--i": 1 } as never}>
               <b>$</b> cd portly && ./build.sh --run{"\n"}
             </span>
-            <span>{"\n"}</span>
-            <span className="ok">
+            <span style={{ "--i": 1 } as never}>{"\n"}</span>
+            <span className="ok" style={{ "--i": 3 } as never}>
               ✓ Portly.app installed in /Applications{"\n"}
             </span>
-            <span className="ok">✓ portly on PATH{"\n"}</span>
-            <span className="ok">
+            <span className="ok" style={{ "--i": 4 } as never}>
+              ✓ portly on PATH{"\n"}
+            </span>
+            <span className="ok" style={{ "--i": 5 } as never}>
               ✓ skill linked at ~/.agents/skills/portly{"\n"}
             </span>
           </pre>
@@ -311,7 +318,7 @@ function Section({
 }) {
   return (
     <section className="section" id={id}>
-      <div className="section-head">
+      <div className="section-head" data-reveal>
         <div>
           <p className="kicker">{kicker}</p>
           <h2>{title}</h2>
@@ -340,11 +347,12 @@ function CopyLine({ value }: { value: string }) {
       <code>
         <b>$</b> {value}
       </code>
-      {copied ? (
-        <Check size={14} aria-hidden="true" />
-      ) : (
-        <Copy size={14} aria-hidden="true" />
-      )}
+      {/* Both icons share one cell and cross over, so the confirmation reads
+          as this control changing rather than one icon replacing another. */}
+      <span className="copy-line-icons" aria-hidden="true">
+        <Copy size={14} className="copy-icon-copy" />
+        <Check size={14} className="copy-icon-check" />
+      </span>
       <span className="sr-only">
         {copied ? "Command copied" : "Copy install command"}
       </span>
@@ -355,7 +363,7 @@ function CopyLine({ value }: { value: string }) {
 /* The 320pt popover from MenuBarContent.swift, over the same machine state. */
 function MenuBarCard() {
   return (
-    <figure className="card menubar-card">
+    <figure className="card menubar-card" data-reveal>
       <div className="card-surface" aria-hidden="true">
         <div className="menubar-head">
           <strong>Portly</strong>
@@ -417,7 +425,11 @@ function MenuBarCard() {
 
 function TakeoverCard() {
   return (
-    <figure className="card takeover-card">
+    <figure
+      className="card takeover-card"
+      data-reveal
+      style={{ "--i": 1 } as never}
+    >
       <div className="card-surface" aria-hidden="true">
         <div className="takeover-banner">
           <TriangleAlert size={15} className="takeover-icon" />

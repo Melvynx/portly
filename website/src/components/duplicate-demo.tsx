@@ -83,9 +83,13 @@ export function DuplicateDemo() {
   const current = modes[mode];
 
   return (
-    <div className={`demo demo-${mode}`}>
+    /* "rows" reveals the table by printing its rows, rather than sliding the
+       whole block in and then trickling the rows in on top of it. */
+    <div className={`demo demo-${mode}`} data-reveal="rows">
       <div className="demo-head">
         <div className="switch" role="group" aria-label="Comparison">
+          {/* One thumb that slides, so the two states read as one control. */}
+          <span className="switch-thumb" aria-hidden="true" />
           <button
             type="button"
             aria-pressed={mode === "without"}
@@ -103,8 +107,10 @@ export function DuplicateDemo() {
             With Portly
           </button>
         </div>
+        {/* The live region itself stays mounted so it keeps announcing; only
+            the text inside is swapped, which is what crossfades. */}
         <p className="demo-tally" aria-live="polite">
-          {current.tally}
+          <span key={mode}>{current.tally}</span>
         </p>
       </div>
 
@@ -125,7 +131,9 @@ export function DuplicateDemo() {
         ))}
       </ol>
 
-      <p className="demo-verdict">{current.verdict}</p>
+      <p className="demo-verdict" key={`verdict-${mode}`}>
+        {current.verdict}
+      </p>
     </div>
   );
 }

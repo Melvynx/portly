@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 
 type Step = {
@@ -146,9 +146,36 @@ function highlightText(line: string): ReactNode {
   return line;
 }
 
+/* Inset from each side of the tab, the way the old per-tab rule was. */
+const UNDERLINE_INSET = 8;
+
 export function AgentConsole() {
   const [active, setActive] = useState(steps[0].id);
   const step = steps.find((item) => item.id === active) ?? steps[0];
+
+  /*
+   * A single underline that travels between tabs, so the strip reads as one
+   * indicator moving instead of four blinking on and off. It is measured
+   * rather than sized in CSS because the four labels have different widths.
+   */
+  const tablist = useRef<HTMLDivElement>(null);
+  const [underline, setUnderline] = useState({ left: 0, width: 0 });
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      const tab = tablist.current?.querySelector<HTMLElement>(`#tab-${active}`);
+      if (!tab) return;
+      setUnderline({
+        left: tab.offsetLeft + UNDERLINE_INSET,
+        width: Math.max(0, tab.offsetWidth - UNDERLINE_INSET * 2),
+      });
+    };
+
+    measure();
+    /* The strip scrolls horizontally on small screens, so widths move. */
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [active]);
 
   /*
    * Tabs move with the arrow keys and the strip holds a single tab stop, so
@@ -171,13 +198,14 @@ export function AgentConsole() {
   };
 
   return (
-    <div className="console">
+    <div className="console" data-reveal>
       <div className="console-tabs">
         <div
           className="console-tablist"
           role="tablist"
           aria-label="Agent commands"
           onKeyDown={onKeyDown}
+          ref={tablist}
         >
           {steps.map((item) => (
             <button
@@ -194,6 +222,19 @@ export function AgentConsole() {
               {item.tab}
             </button>
           ))}
+
+          {/* Rendered only once measured, so it appears in place rather than
+              sliding in from zero width on the first paint. */}
+          {underline.width > 0 ? (
+            <span
+              className="console-underline"
+              aria-hidden="true"
+              style={{
+                width: underline.width,
+                translate: `${underline.left}px 0`,
+              }}
+            />
+          ) : null}
         </div>
         <span className="console-endpoint">127.0.0.1:7737</span>
       </div>
@@ -204,23 +245,28 @@ export function AgentConsole() {
         id={`panel-${step.id}`}
         aria-labelledby={`tab-${step.id}`}
       >
-        <p className="console-note">{step.note}</p>
-        <pre className="console-command">
-          {step.command.split("\n").map((line, index) => (
-            <span key={`${step.id}-cmd-${index}`}>
-              {index === 0 ? <b>$</b> : <b> </b>} {line}
-              {"\n"}
-            </span>
-          ))}
-        </pre>
-        <pre className="console-output">
-          {step.output.split("\n").map((line, index) => (
-            <span key={`${step.id}-out-${index}`}>
-              {step.lang === "json" ? highlightJson(line) : highlightText(line)}
-              {"\n"}
-            </span>
-          ))}
-        </pre>
+        {/* Keyed on the step, so switching tabs replays the panel entrance. */}
+        <div className="console-panel" key={step.id}>
+          <p className="console-note">{step.note}</p>
+          <pre className="console-command">
+            {step.command.split("\n").map((line, index) => (
+              <span key={`${step.id}-cmd-${index}`}>
+                {index === 0 ? <b>$</b> : <b> </b>} {line}
+                {"\n"}
+              </span>
+            ))}
+          </pre>
+          <pre className="console-output">
+            {step.output.split("\n").map((line, index) => (
+              <span key={`${step.id}-out-${index}`}>
+                {step.lang === "json"
+                  ? highlightJson(line)
+                  : highlightText(line)}
+                {"\n"}
+              </span>
+            ))}
+          </pre>
+        </div>
       </div>
     </div>
   );

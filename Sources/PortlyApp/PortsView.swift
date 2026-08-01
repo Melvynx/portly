@@ -316,14 +316,14 @@ private struct PortGroupCard: View {
     let group: ActivePortGroup
     let onOpen: (ActivePort) -> Void
     let onStop: (ActivePort) -> Void
-    @State private var showsAuxiliaryPorts = false
+    @State private var showsOtherPorts = false
 
     private var primaryPorts: [ActivePort] {
-        group.ports.filter { !$0.isAuxiliary }
+        group.ports.filter { !$0.isOtherPort }
     }
 
-    private var auxiliaryPorts: [ActivePort] {
-        group.ports.filter(\.isAuxiliary)
+    private var otherPorts: [ActivePort] {
+        group.ports.filter(\.isOtherPort)
     }
 
     var body: some View {
@@ -362,23 +362,23 @@ private struct PortGroupCard: View {
                 }
             }
 
-            if !auxiliaryPorts.isEmpty {
+            if !otherPorts.isEmpty {
                 if !primaryPorts.isEmpty {
                     Divider().padding(.leading, 41)
                 }
 
                 Button {
-                    showsAuxiliaryPorts.toggle()
+                    showsOtherPorts.toggle()
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: showsAuxiliaryPorts ? "chevron.down" : "chevron.right")
+                        Image(systemName: showsOtherPorts ? "chevron.down" : "chevron.right")
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(.secondary)
                             .frame(width: 12)
-                        Text(auxiliaryDisclosureLabel)
+                        Text(otherPortsDisclosureLabel)
                             .font(.system(size: 11, weight: .medium))
                         Spacer()
-                        Text("Same managed process")
+                        Text("Same process")
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
                     }
@@ -387,13 +387,13 @@ private struct PortGroupCard: View {
                     .padding(.vertical, 9)
                 }
                 .buttonStyle(.plain)
-                .accessibilityValue(showsAuxiliaryPorts ? "Expanded" : "Collapsed")
+                .accessibilityValue(showsOtherPorts ? "Expanded" : "Collapsed")
 
-                if showsAuxiliaryPorts {
+                if showsOtherPorts {
                     Divider().padding(.leading, 41)
-                    ForEach(Array(auxiliaryPorts.enumerated()), id: \.element.id) { index, port in
+                    ForEach(Array(otherPorts.enumerated()), id: \.element.id) { index, port in
                         PortRow(port: port, onOpen: onOpen, onStop: onStop)
-                        if index < auxiliaryPorts.count - 1 {
+                        if index < otherPorts.count - 1 {
                             Divider().padding(.leading, 41)
                         }
                     }
@@ -412,9 +412,9 @@ private struct PortGroupCard: View {
         }
     }
 
-    private var auxiliaryDisclosureLabel: String {
-        let count = auxiliaryPorts.count
-        return "\(count) auxiliary \(count == 1 ? "listener" : "listeners")"
+    private var otherPortsDisclosureLabel: String {
+        let count = otherPorts.count
+        return "\(count) other \(count == 1 ? "port" : "ports")"
     }
 }
 
@@ -522,24 +522,26 @@ struct ActivePort: Identifiable, Hashable {
     let displayName: String
     let kind: Kind
     let serverID: String?
-    let isPrimaryPort: Bool
+    var isPrimaryPort: Bool
 
-    var isAuxiliary: Bool { kind == .managed && !isPrimaryPort }
+    var isOtherPort: Bool {
+        !isPrimaryPort && (kind == .managed || kind == .external)
+    }
 
     var canOpen: Bool {
-        !isAuxiliary && (kind == .managed || kind == .external)
+        !isOtherPort && (kind == .managed || kind == .external)
     }
 
     var canStop: Bool {
-        !isAuxiliary && (kind == .managed || kind == .external)
+        !isOtherPort && (kind == .managed || kind == .external)
     }
 
     var badgeLabel: String {
-        isAuxiliary ? "Auxiliary" : kind.label
+        isOtherPort ? "Other port" : kind.label
     }
 
     var badgeForeground: Color {
-        isAuxiliary ? .secondary : kind.foreground
+        isOtherPort ? .secondary : kind.foreground
     }
 
     var processDetail: String {
@@ -562,19 +564,19 @@ struct ActivePortGroup: Identifiable {
 
     var summary: String {
         let managedServers = Set(ports.filter { $0.kind == .managed }.compactMap(\.serverID)).count
-        let auxiliary = ports.filter(\.isAuxiliary).count
-        let external = ports.filter { $0.kind == .external }.count
+        let otherPorts = ports.filter(\.isOtherPort).count
+        let external = Set(ports.filter { $0.kind == .external }.map(\.pid)).count
         let system = ports.filter { $0.kind == .system || $0.kind == .portly }.count
 
         var parts: [String] = []
         if managedServers > 0 {
             parts.append("\(managedServers) \(managedServers == 1 ? "server" : "servers")")
         }
-        if auxiliary > 0 {
-            parts.append("\(auxiliary) auxiliary")
+        if external > 0 {
+            parts.append("\(external) external \(external == 1 ? "app" : "apps")")
         }
-        if external > 0, managedServers > 0 {
-            parts.append("\(external) external")
+        if otherPorts > 0 {
+            parts.append("\(otherPorts) other \(otherPorts == 1 ? "port" : "ports")")
         }
         if system > 0 {
             parts.append("\(system) system")
@@ -598,13 +600,15 @@ final class ActivePortsModel: ObservableObject {
     var summary: String {
         let ports = groups.flatMap(\.ports)
         let managed = Set(ports.filter { $0.kind == .managed }.compactMap(\.serverID)).count
-        let auxiliary = ports.filter(\.isAuxiliary).count
-        let external = ports.filter { $0.kind == .external }.count
+        let otherPorts = ports.filter(\.isOtherPort).count
+        let external = Set(ports.filter { $0.kind == .external }.map(\.pid)).count
         let system = ports.filter { $0.kind == .system || $0.kind == .portly }.count
         if ports.isEmpty { return "No listening TCP ports" }
         var parts = ["\(String(ports.count)) listening", "\(String(managed)) managed servers"]
-        if auxiliary > 0 { parts.append("\(String(auxiliary)) auxiliary") }
-        parts.append("\(String(external)) external")
+        parts.append("\(String(external)) external \(external == 1 ? "app" : "apps")")
+        if otherPorts > 0 {
+            parts.append("\(String(otherPorts)) other \(otherPorts == 1 ? "port" : "ports")")
+        }
         parts.append("\(String(system)) system")
         return parts.joined(separator: " · ")
     }
@@ -767,6 +771,19 @@ final class ActivePortsModel: ObservableObject {
         return result.values
             .map { group in
                 var sorted = group
+                let externalProcesses = Dictionary(grouping: sorted.ports.indices.filter {
+                    sorted.ports[$0].kind == .external
+                }) { index in
+                    sorted.ports[index].pid
+                }
+                for indices in externalProcesses.values where indices.count > 1 {
+                    guard let primaryIndex = indices.min(by: {
+                        sorted.ports[$0].port < sorted.ports[$1].port
+                    }) else { continue }
+                    for index in indices {
+                        sorted.ports[index].isPrimaryPort = index == primaryIndex
+                    }
+                }
                 sorted.ports.sort { lhs, rhs in
                     if lhs.isPrimaryPort != rhs.isPrimaryPort { return lhs.isPrimaryPort }
                     return lhs.port < rhs.port

@@ -30,6 +30,16 @@
   --gutter: 24px;
   --edge: max(var(--gutter), calc((100vw - var(--shell)) / 2));
 
+  /*
+   * Motion. Named curves are too weak to read as motion at these durations,
+   * so everything below is a custom cubic-bezier: steep start, long settle.
+   */
+  --ease-out-soft: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-in-out-cubic: cubic-bezier(0.645, 0.045, 0.355, 1);
+  /* One deliberate overshoot, kept for the copy confirmation only. */
+  --ease-out-back: cubic-bezier(0.34, 1.4, 0.64, 1);
+
   --sans:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI",
     system-ui, sans-serif;
@@ -49,9 +59,14 @@
 }
 
 html {
-  scroll-behavior: smooth;
   scroll-padding-block-start: 90px;
   background: var(--bg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
 }
 
 body {
@@ -158,6 +173,7 @@ p {
 }
 
 .dot-live {
+  position: relative;
   background: var(--live);
   box-shadow: 0 0 0 3px oklch(0.788 0.185 149 / 0.16);
 }
@@ -234,13 +250,15 @@ p {
   font-weight: 600;
   letter-spacing: -0.01em;
   transition:
-    background-color 130ms,
-    border-color 130ms,
-    transform 130ms;
+    background-color 130ms ease,
+    border-color 130ms ease,
+    transform 150ms var(--ease-out-quad);
 }
 
+/* Press feedback is felt, not seen: 3% is the most you can take before the
+   label visibly collapses. */
 .btn:active {
-  transform: scale(0.96);
+  transform: scale(0.97);
 }
 
 .btn-primary {
@@ -483,12 +501,43 @@ p {
   color: var(--faint);
 }
 
-.copy-line.is-copied {
-  border-color: oklch(0.788 0.185 149 / 0.4);
-  color: var(--live);
+/*
+ * Copy and check share one cell and cross over, so the confirmation reads as
+ * the same control changing rather than two icons swapping places.
+ */
+.copy-line-icons {
+  display: grid;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  place-items: center;
 }
 
-.copy-line.is-copied svg {
+.copy-line-icons svg {
+  grid-area: 1 / 1;
+  transition:
+    opacity 120ms ease,
+    scale 220ms var(--ease-out-back);
+}
+
+.copy-line .copy-icon-check {
+  color: var(--live);
+  opacity: 0;
+  scale: 0.65;
+}
+
+.copy-line.is-copied .copy-icon-copy {
+  opacity: 0;
+  scale: 0.65;
+}
+
+.copy-line.is-copied .copy-icon-check {
+  opacity: 1;
+  scale: 1;
+}
+
+.copy-line.is-copied {
+  border-color: oklch(0.788 0.185 149 / 0.4);
   color: var(--live);
 }
 
@@ -592,16 +641,35 @@ p {
   background: oklch(1 0 0 / 0.02);
 }
 
+/* Equal columns so the thumb can slide by exactly its own width. */
 .switch {
-  display: inline-flex;
-  gap: 2px;
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   padding: 3px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: oklch(0 0 0 / 0.3);
 }
 
+.switch-thumb {
+  position: absolute;
+  inset-block: 3px;
+  inset-inline-start: 3px;
+  width: calc(50% - 3px);
+  border-radius: 7px;
+  background: oklch(1 0 0 / 0.09);
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.08);
+  /* Moving on screen, not entering it: accelerate out, brake in. */
+  transition: translate 260ms var(--ease-in-out-cubic);
+}
+
+.demo-with .switch-thumb {
+  translate: 100% 0;
+}
+
 .switch button {
+  position: relative;
   height: 30px;
   border: 0;
   border-radius: 7px;
@@ -610,9 +678,8 @@ p {
   padding-inline: 13px;
   font-size: 12.5px;
   font-weight: 550;
-  transition:
-    color 120ms,
-    background-color 120ms;
+  white-space: nowrap;
+  transition: color 200ms ease;
 }
 
 .switch button:hover {
@@ -620,9 +687,13 @@ p {
 }
 
 .switch button.is-active {
-  background: oklch(1 0 0 / 0.09);
-  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.08);
   color: var(--text);
+}
+
+/* Remounted with the mode, so each flip crossfades instead of snapping. */
+.demo-tally span,
+.demo-verdict {
+  animation: soft-in 280ms ease both;
 }
 
 .demo-tally {
@@ -719,9 +790,26 @@ p {
 }
 
 .console-tablist {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 2px;
+}
+
+/*
+ * One underline that travels between tabs instead of four that blink on and
+ * off, so the strip reads as a single indicator moving.
+ */
+.console-underline {
+  position: absolute;
+  inset-block-end: -1px;
+  inset-inline-start: 0;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+  transition:
+    translate 280ms var(--ease-in-out-cubic),
+    width 280ms var(--ease-in-out-cubic);
 }
 
 .console-tabs button {
@@ -744,16 +832,6 @@ p {
   color: var(--text);
 }
 
-.console-tabs button.is-active::after {
-  position: absolute;
-  inset-block-end: -1px;
-  inset-inline: 8px;
-  height: 2px;
-  border-radius: 2px 2px 0 0;
-  background: var(--accent);
-  content: "";
-}
-
 .console-endpoint {
   margin-inline-start: auto;
   color: var(--faint);
@@ -765,6 +843,11 @@ p {
   /* Keeps the panel from collapsing when a short tab replaces a long one. */
   min-height: 420px;
   padding: clamp(18px, 3vw, 28px);
+}
+
+/* The panel is remounted per tab, so this plays once per switch. */
+.console-panel {
+  animation: panel-in 260ms var(--ease-out-soft) both;
 }
 
 .console-note {
@@ -1964,42 +2047,223 @@ p {
 
 /* ==================================================================== motion */
 
-@media (prefers-reduced-motion: no-preference) {
-  .hero-copy > * {
-    animation: rise 560ms cubic-bezier(0.22, 0.6, 0.2, 1) both;
-  }
-
-  .hero-copy > :nth-child(2) {
-    animation-delay: 60ms;
-  }
-  .hero-copy > :nth-child(3) {
-    animation-delay: 120ms;
-  }
-  .hero-copy > :nth-child(4) {
-    animation-delay: 180ms;
-  }
-  .hero-copy > :nth-child(5) {
-    animation-delay: 240ms;
-  }
-
-  .hero-stage {
-    animation: rise 700ms 200ms cubic-bezier(0.22, 0.6, 0.2, 1) both;
-  }
-
-  .demo-lines li {
-    animation: rise 260ms cubic-bezier(0.22, 0.6, 0.2, 1) both;
-    animation-delay: calc(var(--i) * 55ms);
-  }
-}
-
 @keyframes rise {
   from {
     opacity: 0;
-    translate: 0 12px;
+    translate: 0 var(--rise, 12px);
   }
   to {
     opacity: 1;
     translate: 0 0;
+  }
+}
+
+@keyframes soft-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* The window settles into place instead of arriving at full size. */
+@keyframes stage-in {
+  from {
+    opacity: 0;
+    translate: 0 20px;
+    scale: 0.985;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+  }
+}
+
+/* A hint of blur fuses the outgoing and incoming panels into one change. */
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    translate: 0 5px;
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    filter: blur(0);
+  }
+}
+
+@keyframes caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes port-ping {
+  from {
+    opacity: 0.45;
+    scale: 1;
+  }
+  70%,
+  100% {
+    opacity: 0;
+    scale: 2.7;
+  }
+}
+
+/* -------------------------------------------------------------- hero intro */
+
+/*
+ * Ordered by importance, not by DOM position: the headline lands first and
+ * travels furthest, the release tag follows it, and the install line only
+ * fades. A uniform stagger would flatten that hierarchy.
+ */
+.hero-copy > * {
+  animation: rise 620ms var(--ease-out-soft) both;
+}
+
+.hero-copy > h1 {
+  --rise: 16px;
+}
+
+.hero-copy > .tag {
+  --rise: 6px;
+  animation-delay: 90ms;
+}
+
+.hero-copy > .lede {
+  --rise: 12px;
+  animation-delay: 150ms;
+}
+
+.hero-copy > .actions {
+  --rise: 10px;
+  animation-delay: 220ms;
+}
+
+.hero-copy > .copy-line {
+  --rise: 0px;
+  animation-delay: 290ms;
+}
+
+/* The glow is a 70px blur, so it fades rather than moves: no re-rasterising. */
+.hero-stage::before {
+  animation: soft-in 900ms 200ms ease both;
+}
+
+.hero-stage > .window {
+  animation: stage-in 820ms 160ms var(--ease-out-soft) both;
+}
+
+/* ------------------------------------------------------------ scroll reveal */
+
+/*
+ * The hidden state is gated behind .js-reveal, which the observer adds on
+ * mount, so the page stays fully readable if the script never runs.
+ */
+.js-reveal [data-reveal] {
+  opacity: 0;
+  translate: 0 16px;
+  transition:
+    opacity 620ms var(--ease-out-soft),
+    translate 620ms var(--ease-out-soft);
+  transition-delay: calc(var(--i, 0) * 60ms);
+}
+
+.js-reveal [data-reveal].is-in {
+  opacity: 1;
+  translate: 0 0;
+}
+
+/*
+ * The comparison table prints its rows rather than sliding in as one block,
+ * and reprints them every time the switch is flipped.
+ */
+.js-reveal [data-reveal="rows"] {
+  opacity: 1;
+  translate: none;
+}
+
+.js-reveal [data-reveal="rows"] .demo-lines li {
+  opacity: 0;
+}
+
+[data-reveal="rows"].is-in .demo-lines li {
+  --rise: 8px;
+  animation: rise 340ms var(--ease-out-soft) both;
+  animation-delay: calc(var(--i) * 50ms);
+}
+
+/* The install block arrives first, then the script reports what it did. */
+.js-reveal .install .install-shell span {
+  opacity: 0;
+}
+
+.install.is-in .install-shell span {
+  --rise: 4px;
+  animation: rise 420ms var(--ease-out-soft) both;
+  animation-delay: calc(300ms + var(--i) * 110ms);
+}
+
+/* -------------------------------------------------------------------- life */
+
+@media (prefers-reduced-motion: no-preference) {
+  /*
+   * Telling you what is alive is the whole product, so the two dots that
+   * report a running server breathe. The dots inside the lists do not: at
+   * eight of them it would read as noise instead of state.
+   */
+  .dot-live::after,
+  .app-state .app-dot.is-running::after {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    animation: port-ping 2.8s var(--ease-out-soft) infinite;
+    content: "";
+  }
+
+  .dot-live::after {
+    background: var(--live);
+  }
+
+  .app-state .app-dot.is-running {
+    position: relative;
+  }
+
+  .app-state .app-dot.is-running::after {
+    background: #30d158;
+  }
+
+  /* The window is a picture of a live terminal, so it gets a live caret. */
+  .t-caret span {
+    animation: caret-blink 1.08s steps(1, end) infinite;
+  }
+}
+
+/* --------------------------------------------------------- reduced motion */
+
+/* Gentler, not gone: the fades stay and carry the same information, the
+   travel and the scaling are what get removed. */
+@media (prefers-reduced-motion: reduce) {
+  .hero-copy > *,
+  .hero-stage > .window,
+  .console-panel,
+  [data-reveal="rows"].is-in .demo-lines li,
+  .install.is-in .install-shell span {
+    animation-name: soft-in;
+    animation-duration: 320ms;
+  }
+
+  .js-reveal [data-reveal] {
+    translate: none;
+    transition-duration: 320ms;
+  }
+
+  .console-underline,
+  .switch-thumb {
+    transition-duration: 1ms;
   }
 }
 
