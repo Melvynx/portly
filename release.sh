@@ -4,17 +4,12 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VERSION="$(grep -o '"[0-9][^"]*"' "$ROOT/Sources/PortlyCore/Version.swift" | tr -d '"')"
+VERSION="$(git -C "$ROOT" show HEAD:Sources/PortlyCore/Version.swift | grep -o '"[0-9][^"]*"' | tr -d '"')"
 EXPECTED_VERSION="${1:-$VERSION}"
 TAG="v$VERSION"
 
 if [ "$EXPECTED_VERSION" != "$VERSION" ]; then
   echo "Version.swift contains $VERSION, not $EXPECTED_VERSION." >&2
-  exit 1
-fi
-
-if [ -n "$(git -C "$ROOT" status --porcelain)" ]; then
-  echo "Commit the release changes before publishing $TAG." >&2
   exit 1
 fi
 
@@ -31,18 +26,29 @@ if gh release view "$TAG" --repo Melvynx/portly >/dev/null 2>&1; then
   exit 1
 fi
 
-PREVIOUS_DIR="$(mktemp -d "${TMPDIR:-/tmp}/portly-appcast.XXXXXX")"
-trap 'trash "$PREVIOUS_DIR" >/dev/null 2>&1 || true' EXIT
+RELEASE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/portly-release.XXXXXX")"
+SOURCE_DIR="$RELEASE_DIR/source"
+PREVIOUS_DIR="$RELEASE_DIR/previous"
+mkdir -p "$SOURCE_DIR" "$PREVIOUS_DIR"
+trap 'trash "$RELEASE_DIR" >/dev/null 2>&1 || true' EXIT
+
+# Build exactly the pushed commit. Local edits in the working tree are never
+# stashed, copied into the archive, or otherwise disturbed.
+git -C "$ROOT" archive HEAD | tar -x -C "$SOURCE_DIR"
 gh release download --repo Melvynx/portly --pattern appcast.xml --dir "$PREVIOUS_DIR" >/dev/null 2>&1 || true
 
-PORTLY_PREVIOUS_APPCAST="$PREVIOUS_DIR/appcast.xml" "$ROOT/build.sh" --release
+PORTLY_PREVIOUS_APPCAST="$PREVIOUS_DIR/appcast.xml" "$SOURCE_DIR/build.sh" --release
 
 gh release create "$TAG" \
-  "$ROOT/dist/Portly-macOS.zip#Portly for macOS" \
-  "$ROOT/dist/appcast.xml#Sparkle update feed" \
+  "$SOURCE_DIR/dist/Portly-macOS.zip#Portly for macOS" \
+  "$SOURCE_DIR/dist/appcast.xml#Sparkle update feed" \
   --repo Melvynx/portly \
   --target "$LOCAL_SHA" \
   --title "Portly $VERSION" \
   --generate-notes
+
+mkdir -p "$ROOT/dist"
+cp "$SOURCE_DIR/dist/Portly-macOS.zip" "$ROOT/dist/Portly-macOS.zip"
+cp "$SOURCE_DIR/dist/appcast.xml" "$ROOT/dist/appcast.xml"
 
 gh release view "$TAG" --repo Melvynx/portly --json tagName,url,assets
