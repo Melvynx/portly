@@ -1,6 +1,6 @@
 ---
 name: portly
-description: Manage local development servers with the Portly macOS app and CLI. Use when an agent needs to inspect dev-server state or logs, register a project, add or update a server command, start, stop, or restart servers, diagnose a local port conflict, open Portly, or safely quit the supervisor.
+description: Manage persistent local development servers with the Portly macOS app and CLI. Use whenever an agent would otherwise launch a long-lived dev server or needs to inspect logs and state, register or configure projects and commands, start, stop, restart, or adopt servers, resolve local port conflicts, open Portly, or safely quit the supervisor.
 ---
 
 # Portly
@@ -10,6 +10,20 @@ Use the `portly` CLI as the primary interface. Every command launches Portly.app
 ## Inspect first
 
 Run `portly status --json`. Use an exact server ID or `project/server` when names are ambiguous. Prefer `--json` whenever supported.
+
+## Command reference
+
+| Command | Purpose |
+| --- | --- |
+| `status`, `list`, `ls` | List projects and live server state |
+| `start`, `stop`, `restart` | Control a server or every server in `--project` |
+| `logs` | Read captured output with `--tail` |
+| `add-project`, `add-server`, `update-server`, `remove` | Manage configuration |
+| `take-over`, `adopt` | Move an external listener under Portly |
+| `port`, `kill-port` | Inspect or explicitly stop a port occupant |
+| `open`, `quit`, `config` | Control the app or read its configuration |
+
+Run `portly <command> --help` for exact flags. Prefer `--json`; `config` prints JSON or a path directly.
 
 ## Add and verify a server
 
