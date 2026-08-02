@@ -75,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         server.start()
         control = server
         Supervisor.shared.resumeAfterUpdaterRelaunchIfNeeded()
+        Task { await PortlyAnalytics.shared.trackLaunch() }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

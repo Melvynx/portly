@@ -3,11 +3,11 @@ import { createFileRoute } from "@tanstack/react-router";
 export const Route = createFileRoute("/privacy")({
   head: () => ({
     meta: [
-      { title: "Privacy Policy — Portly Companion" },
+      { title: "Privacy Policy — Portly" },
       {
         name: "description",
         content:
-          "Privacy policy for Portly Companion, the sandboxed macOS companion for a local Portly service.",
+          "Privacy policy for the Portly macOS app and its sandboxed App Store companion.",
       },
     ],
     links: [
@@ -42,15 +42,37 @@ function PrivacyPolicy() {
       </a>
 
       <header style={sectionStyle}>
-        <h1>Portly Companion Privacy Policy</h1>
-        <p>Effective August 1, 2026</p>
+        <h1>Portly Privacy Policy</h1>
+        <p>Effective August 2, 2026</p>
       </header>
 
       <section style={sectionStyle}>
-        <h2>Data collection</h2>
+        <h2>Direct app analytics</h2>
+        <p>
+          The direct-download Portly app sends two anonymous usage events to our
+          self-hosted analytics service: one when an installation is first seen
+          and one when the app launches. The event payload contains only the
+          Portly version, macOS version, and processor architecture.
+        </p>
+        <p>
+          Like any web request, the source IP address and User-Agent reach the
+          analytics server and are processed to calculate aggregate visitor
+          counts. Portly sends no cookie or stable device identifier.
+        </p>
+        <p>
+          Portly does not send names, email addresses, device identifiers,
+          project names, paths, commands, environment variables, server logs, or
+          file contents. Analytics uses no cookies, advertising profiles,
+          session replay, or third-party analytics provider.
+        </p>
+      </section>
+
+      <section style={sectionStyle}>
+        <h2>App Store companion</h2>
         <p>
           Portly Companion does not collect, store, sell, or transmit personal
-          data to the developer or to third parties.
+          data to the developer or to third parties. It does not include the
+          anonymous analytics used by the direct-download Portly app.
         </p>
       </section>
 

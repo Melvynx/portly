@@ -37,5 +37,10 @@ let package = Package(
             ],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        .testTarget(
+            name: "PortlyAppTests",
+            dependencies: ["PortlyApp"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )
