@@ -146,7 +146,10 @@ if [ "$RELEASE" -eq 1 ]; then
     exit 1
   fi
   echo "==> Signing for Developer ID distribution"
+  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" \
+    "$APP/Contents/Resources/portly-cli"
   codesign --force --deep --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP"
+  codesign --verify --strict --verbose=2 "$APP/Contents/Resources/portly-cli"
   codesign --verify --deep --strict --verbose=2 "$APP"
 
   ARCHIVE="$DIST/Portly-macOS.zip"
