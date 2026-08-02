@@ -27,9 +27,28 @@ final class UpdaterRelaunchStateStoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
     }
 
-    func testConsumeDiscardsLegacyOrMalformedState() throws {
+    func testConsumeAcceptsFreshLegacyState() throws {
         let url = temporaryURL()
         try Data(#"{"serverIDs":["srv_legacy"]}"#.utf8).write(to: url)
+
+        XCTAssertEqual(UpdaterRelaunchStateStore(url: url).consume(), ["srv_legacy"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    func testConsumeDiscardsExpiredLegacyState() throws {
+        let url = temporaryURL()
+        let modifiedAt = Date(timeIntervalSince1970: 1_000)
+        try Data(#"{"serverIDs":["srv_stale"]}"#.utf8).write(to: url)
+        try FileManager.default.setAttributes([.modificationDate: modifiedAt], ofItemAtPath: url.path)
+
+        let later = modifiedAt.addingTimeInterval(301)
+        XCTAssertNil(UpdaterRelaunchStateStore(url: url, now: { later }).consume())
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    func testConsumeDiscardsMalformedState() throws {
+        let url = temporaryURL()
+        try Data("not-json".utf8).write(to: url)
 
         XCTAssertNil(UpdaterRelaunchStateStore(url: url).consume())
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))

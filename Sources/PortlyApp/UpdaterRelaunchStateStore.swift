@@ -6,6 +6,10 @@ struct UpdaterRelaunchStateStore {
         let createdAt: Date
     }
 
+    private struct LegacyState: Codable {
+        let serverIDs: [String]
+    }
+
     let url: URL
     var now: () -> Date = Date.init
 
@@ -24,11 +28,25 @@ struct UpdaterRelaunchStateStore {
         guard (try? FileManager.default.moveItem(at: url, to: claimedURL)) != nil else { return nil }
         defer { try? FileManager.default.removeItem(at: claimedURL) }
 
-        guard let data = try? Data(contentsOf: claimedURL),
-              let state = try? JSONDecoder().decode(State.self, from: data)
-        else { return nil }
-        let age = now().timeIntervalSince(state.createdAt)
-        guard (0...maxAge).contains(age), !state.serverIDs.isEmpty else { return nil }
-        return state.serverIDs
+        guard let data = try? Data(contentsOf: claimedURL) else { return nil }
+
+        let serverIDs: [String]
+        let createdAt: Date
+        if let state = try? JSONDecoder().decode(State.self, from: data) {
+            serverIDs = state.serverIDs
+            createdAt = state.createdAt
+        } else if let state = try? JSONDecoder().decode(LegacyState.self, from: data),
+                  let attributes = try? FileManager.default.attributesOfItem(atPath: claimedURL.path),
+                  let modifiedAt = attributes[.modificationDate] as? Date
+        {
+            serverIDs = state.serverIDs
+            createdAt = modifiedAt
+        } else {
+            return nil
+        }
+
+        let age = now().timeIntervalSince(createdAt)
+        guard (0...maxAge).contains(age), !serverIDs.isEmpty else { return nil }
+        return serverIDs
     }
 }
