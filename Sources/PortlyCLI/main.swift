@@ -46,7 +46,11 @@ extension ServerStatus {
         let port = self.port.map { ":\($0)" } ?? ""
         let uptime = startedAt.map { " up \(Int(Date().timeIntervalSince($0)))s" } ?? ""
         let restarts = restartCount > 0 ? " restarts:\(restartCount)" : ""
-        return "  \(stateGlyph) \(name)\(port)  \(state.rawValue)\(uptime)\(restarts)"
+        let cpu = cpuPercent.map { " cpu:\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? ""
+        let memory = memoryBytes.map { " footprint:\(ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .memory))" } ?? ""
+        let resident = residentMemoryBytes.map { " resident:\(ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .memory))" } ?? ""
+        let processes = processCount.map { " processes:\($0)" } ?? ""
+        return "  \(stateGlyph) \(name)\(port)  \(state.rawValue)\(uptime)\(cpu)\(memory)\(resident)\(processes)\(restarts)"
     }
 }
 

@@ -217,12 +217,20 @@ public struct ServerStatus: Codable, Identifiable, Hashable {
     public var lastError: String?
     public var healthy: Bool
     public var url: String?
+    public var cpuPercent: Double?
+    /// Total physical footprint, including compressed and swapped owned pages.
+    public var memoryBytes: UInt64?
+    /// Portion of the process tree currently resident in RAM.
+    public var residentMemoryBytes: UInt64?
+    public var processCount: Int?
 
     public init(
         id: String, name: String, projectID: String, projectName: String,
         command: String, port: Int?, directory: String, state: ServerState,
         pid: Int32?, startedAt: Date?, restartCount: Int, lastExitCode: Int32?,
-        lastError: String?, healthy: Bool, url: String?
+        lastError: String?, healthy: Bool, url: String?,
+        cpuPercent: Double? = nil, memoryBytes: UInt64? = nil,
+        residentMemoryBytes: UInt64? = nil, processCount: Int? = nil
     ) {
         self.id = id
         self.name = name
@@ -239,6 +247,10 @@ public struct ServerStatus: Codable, Identifiable, Hashable {
         self.lastError = lastError
         self.healthy = healthy
         self.url = url
+        self.cpuPercent = cpuPercent
+        self.memoryBytes = memoryBytes
+        self.residentMemoryBytes = residentMemoryBytes
+        self.processCount = processCount
     }
 }
 

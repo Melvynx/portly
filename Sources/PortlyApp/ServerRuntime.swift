@@ -16,6 +16,7 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
     @Published private(set) var restartCount: Int = 0
     @Published private(set) var lastExitCode: Int32?
     @Published private(set) var lastError: String?
+    @Published private(set) var processMetrics: ProcessMetrics?
 
     let id: String
     private(set) var config: ServerConfig
@@ -94,8 +95,16 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
             lastExitCode: lastExitCode,
             lastError: lastError,
             healthy: healthy,
-            url: url
+            url: url,
+            cpuPercent: processMetrics?.cpuPercent,
+            memoryBytes: processMetrics?.memoryBytes,
+            residentMemoryBytes: processMetrics?.residentMemoryBytes,
+            processCount: processMetrics?.processCount
         )
+    }
+
+    func updateProcessMetrics(_ metrics: ProcessMetrics?) {
+        processMetrics = metrics
     }
 
     private func expand(_ path: String) -> String {
@@ -178,6 +187,10 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
         restartWork?.cancel()
         restartWork = nil
         manualStop = false
+        // A manual start is a fresh attempt. In particular, let someone retry
+        // after the automatic restart budget has been exhausted.
+        restartCount = 0
+        lastHealthyAt = nil
         consecutiveHealthFailures = 0
         spawn()
     }
@@ -445,6 +458,7 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
         if new == .stopped || new == .failed {
             healthy = false
             pid = nil
+            processMetrics = nil
             if new == .stopped { startedAt = nil }
         }
         onStateChange?()
@@ -461,6 +475,7 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
             self.lastExitCode = exitCode
             self.pid = nil
             self.healthy = false
+            self.processMetrics = nil
             self.process = nil
 
             let code = exitCode.map(String.init) ?? "signal"

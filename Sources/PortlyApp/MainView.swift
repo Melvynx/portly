@@ -4,6 +4,7 @@ import SwiftUI
 
 struct MainView: View {
     enum Selection: Hashable {
+        case resources
         case ports
         case project(String)
         case server(String)
@@ -12,6 +13,8 @@ struct MainView: View {
     @EnvironmentObject private var supervisor: Supervisor
     @Environment(\.openWindow) private var openWindow
     @ObservedObject private var appSelection = AppSelection.shared
+    @StateObject private var agentSetup = AgentSetup()
+    @AppStorage("agentOnboardingDismissed") private var agentOnboardingDismissed = false
     @State private var selection: Selection?
     @State private var editingProject: Project?
     @State private var editingServer: EditingServer?
@@ -23,9 +26,17 @@ struct MainView: View {
                 .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 340)
         } detail: {
             detail
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if !agentOnboardingDismissed {
+                        AgentOnboardingCard(setup: agentSetup) {
+                            agentOnboardingDismissed = true
+                        }
+                    }
+                }
         }
         .onAppear {
             WindowOpener.opener = { openWindow(id: WindowOpener.mainWindowID) }
+            agentSetup.refresh()
             applyPendingSelection()
         }
         .onChange(of: appSelection.pending) { applyPendingSelection() }
@@ -66,6 +77,7 @@ struct MainView: View {
                 Section {
                     ProjectHeader(project: project)
                         .tag(Selection.project(project.id))
+                        .onTapGesture(count: 2) { openProject(project) }
                         .contextMenu { projectMenu(project) }
 
                     ForEach(project.servers) { server in
@@ -115,8 +127,32 @@ struct MainView: View {
         }
     }
 
+    private func openProject(_ project: Project) {
+        guard let url = project.servers
+            .compactMap({ supervisor.runtime(for: $0.id)?.url })
+            .first,
+            let link = URL(string: url)
+        else { return }
+
+        NSWorkspace.shared.open(link)
+    }
+
     private var sidebarActions: some View {
         VStack(spacing: 6) {
+            sidebarDestinationButton(
+                title: "Resources",
+                systemImage: "chart.xyaxis.line",
+                selection: .resources,
+                hint: "Shows live memory, CPU, history, and every managed process"
+            )
+
+            sidebarDestinationButton(
+                title: "View Ports",
+                systemImage: "network",
+                selection: .ports,
+                hint: "Shows every listening TCP port on this Mac"
+            )
+
             Button {
                 addingProject = true
             } label: {
@@ -125,31 +161,42 @@ struct MainView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
+            .accessibilityLabel("Add project")
 
-            Button {
-                selection = .ports
-            } label: {
-                HStack {
-                    Label("View Ports", systemImage: "network")
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 10)
-            .frame(height: 32)
-            .background {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(selection == .ports ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.055))
-            }
-            .accessibilityHint("Shows every listening TCP port on this Mac")
         }
         .font(PortlyTypography.bodyMedium)
         .padding(10)
         .background(.bar)
+    }
+
+    private func sidebarDestinationButton(
+        title: String,
+        systemImage: String,
+        selection destination: Selection,
+        hint: String
+    ) -> some View {
+        Button {
+            selection = destination
+        } label: {
+            HStack {
+                Label(title, systemImage: systemImage)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 10)
+        .frame(height: 32)
+        .background {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(self.selection == destination ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.055))
+        }
+        .accessibilityHint(hint)
+        .accessibilityLabel(title)
     }
 
     @ViewBuilder
@@ -194,6 +241,8 @@ struct MainView: View {
     @ViewBuilder
     private var detail: some View {
         switch selection {
+        case .resources:
+            ResourceDashboard()
         case .ports:
             PortsView()
         case .server(let id):
@@ -284,11 +333,26 @@ private struct ServerRow: View {
                 Text(runtime.config.name)
                     .font(PortlyTypography.bodyMedium)
                     .lineLimit(1)
-                if let port = runtime.config.port {
-                    Text("localhost:\(String(port))")
-                        .font(PortlyTypography.metadata)
-                        .foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    if let port = runtime.config.port {
+                        Text("localhost:\(String(port))")
+                    }
+                    if let metrics = runtime.processMetrics {
+                        Spacer(minLength: 4)
+                        Image(systemName: "memorychip")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(metrics.memoryPressure.color)
+                            .help(
+                                "Footprint: \(memoryText(metrics)) — \(metrics.memoryPressure.label). "
+                                    + "Open the server for full resource details."
+                            )
+                            .accessibilityLabel(
+                                "Memory footprint \(memoryText(metrics)), \(metrics.memoryPressure.label) use"
+                            )
+                    }
                 }
+                .font(PortlyTypography.metadata)
+                .foregroundStyle(.secondary)
             }
             Spacer()
             if let startedAt = runtime.startedAt, runtime.isRunning {
@@ -299,6 +363,10 @@ private struct ServerRow: View {
             }
         }
         .padding(.vertical, 1)
+    }
+
+    private func memoryText(_ metrics: ProcessMetrics) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(metrics.memoryBytes), countStyle: .memory)
     }
 }
 

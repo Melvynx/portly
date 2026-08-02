@@ -9,6 +9,7 @@ struct ServerDetail: View {
 
     @EnvironmentObject private var supervisor: Supervisor
     @State private var conflict: PortOccupant?
+    @State private var showsResources = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -46,13 +47,19 @@ struct ServerDetail: View {
                     }
                 } label: {
                     Label(
-                        runtime.isRunning ? "Stop" : "Start",
-                        systemImage: runtime.isRunning ? "stop.fill" : "play.fill"
+                        runtime.isRunning ? "Stop" : runtime.state == .failed ? "Retry" : "Start",
+                        systemImage: runtime.isRunning ? "stop.fill" : runtime.state == .failed ? "arrow.clockwise" : "play.fill"
                     )
                     .contentTransition(.symbolEffect(.replace))
                 }
                 .animation(Motion.state, value: runtime.isRunning)
-                .help(runtime.isRunning ? "Stop the server" : "Start the server")
+                .help(
+                    runtime.isRunning
+                        ? "Stop the server"
+                        : runtime.state == .failed
+                            ? "Reset retries and start the server"
+                            : "Start the server"
+                )
 
                 if runtime.isRunning {
                     Button { runtime.restart() } label: { Label("Restart", systemImage: "arrow.clockwise") }
@@ -109,58 +116,124 @@ struct ServerDetail: View {
     // MARK: - Info bar
 
     private var infoBar: some View {
-        HStack(spacing: 8) {
-            StatusBadge(state: runtime.state)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 14) {
+                StatusBadge(state: runtime.state)
 
-            if let pid = runtime.pid {
-                metric("PID", String(pid))
-            }
-            if let port = runtime.config.port {
-                metric("Port", String(port))
-            }
-            if let startedAt = runtime.startedAt, runtime.isRunning {
-                metric("Uptime", startedAt.compactUptime)
-            }
-            if runtime.restartCount > 0 {
-                metric("Restarts", "\(runtime.restartCount)/\(supervisor.settings.maxRestartAttempts)")
+                if let pid = runtime.pid {
+                    fact("PID \(pid)", systemImage: "number")
+                }
+                if let port = runtime.config.port {
+                    fact("Port \(port)", systemImage: "network")
+                }
+                if let startedAt = runtime.startedAt, runtime.isRunning {
+                    fact("Up \(startedAt.compactUptime)", systemImage: "clock")
+                }
+                if runtime.restartCount > 0 {
+                    fact(
+                        "\(runtime.restartCount)/\(supervisor.settings.maxRestartAttempts) restarts",
+                        systemImage: "arrow.clockwise"
+                    )
+                }
+
+                Spacer()
+
+                if let error = runtime.lastError {
+                    Text(error)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.red)
+                        .lineLimit(1)
+                        .help(error)
+                }
+
+                if runtime.processMetrics != nil {
+                    Button {
+                        showsResources.toggle()
+                    } label: {
+                        Image(systemName: "chart.bar.xaxis")
+                            .foregroundStyle(showsResources ? Color.accentColor : Color.secondary)
+                            .frame(width: 24, height: 24)
+                            .background {
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(showsResources ? Color.accentColor.opacity(0.12) : .clear)
+                            }
+                    }
+                    .buttonStyle(.borderless)
+                    .help(showsResources ? "Hide resource use" : "Show resource use")
+                    .accessibilityLabel(showsResources ? "Hide resource use" : "Show resource use")
+                }
             }
 
-            Spacer()
+            if let metrics = runtime.processMetrics, showsResources {
+                HStack(spacing: 18) {
+                    compactResource(
+                        value: metrics.cpuPercent.formatted(.number.precision(.fractionLength(1))) + "%",
+                        systemImage: "cpu",
+                        color: metrics.cpuPressure.color,
+                        label: "CPU",
+                        help: "Total CPU used by this server and its child processes"
+                    )
+                    compactResource(
+                        value: ByteCountFormatter.string(
+                            fromByteCount: Int64(metrics.memoryBytes),
+                            countStyle: .memory
+                        ),
+                        systemImage: "memorychip",
+                        color: metrics.memoryPressure.color,
+                        label: "Memory",
+                        help: "Total memory owned by this server and its child processes"
+                    )
+                    compactResource(
+                        value: String(metrics.processCount),
+                        systemImage: "square.stack.3d.up",
+                        color: .blue,
+                        label: "Processes",
+                        help: "Processes Portly groups together for this server"
+                    )
 
-            if let error = runtime.lastError {
-                Text(error)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.red)
-                    .lineLimit(1)
-                    .help(error)
+                    Spacer()
+
+                    Button {
+                        AppSelection.shared.pending = .resources
+                    } label: {
+                        Label("Details", systemImage: "arrow.up.right")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Open the resource dashboard")
+                }
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
         .background(.regularMaterial)
     }
 
-    private func metric(_ label: String, _ value: String) -> some View {
+    private func fact(_ text: String, systemImage: String) -> some View {
+        Label(text, systemImage: systemImage)
+            .font(PortlyTypography.metadata)
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+    }
+
+    private func compactResource(
+        value: String,
+        systemImage: String,
+        color: Color,
+        label: String,
+        help: String
+    ) -> some View {
         HStack(spacing: 6) {
-            Text(label)
-                .font(PortlyTypography.label)
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
-                .tracking(0.45)
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(color)
             Text(value)
                 .font(PortlyTypography.metric)
                 .monospacedDigit()
         }
-        .padding(.horizontal, 8)
-        .frame(height: 26)
-        .background {
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(Color.primary.opacity(0.045))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.75)
-        }
+        .help(help)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label), \(value)")
+        .accessibilityHint(help)
     }
 
     // MARK: - Port conflict

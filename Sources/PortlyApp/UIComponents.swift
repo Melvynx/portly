@@ -42,6 +42,16 @@ extension ServerState {
     }
 }
 
+extension ResourcePressure {
+    var color: Color {
+        switch self {
+        case .light: return .green
+        case .moderate: return .orange
+        case .high: return .red
+        }
+    }
+}
+
 /// The standard macOS status dot: a filled circle, nothing more — except while a
 /// server is coming up, when it breathes. A settling server is the one thing you
 /// most want to read from across the room without parsing text.

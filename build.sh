@@ -33,14 +33,16 @@ cd "$ROOT"
 if [ "$RELEASE" -eq 1 ]; then
   swift build -c release --triple arm64-apple-macosx14.0 --product PortlyApp
   swift build -c release --triple x86_64-apple-macosx14.0 --product PortlyApp
+  swift build -c release --triple arm64-apple-macosx14.0 --product portly
+  swift build -c release --triple x86_64-apple-macosx14.0 --product portly
   ARM64_BIN_DIR="$(swift build -c release --triple arm64-apple-macosx14.0 --show-bin-path)"
   X86_64_BIN_DIR="$(swift build -c release --triple x86_64-apple-macosx14.0 --show-bin-path)"
   BIN_DIR="$ARM64_BIN_DIR"
 else
   swift build -c release --product PortlyApp
+  swift build -c release --product portly
   BIN_DIR="$(swift build -c release --show-bin-path)"
 fi
-swift build -c release --product portly
 
 VERSION="$(grep -o '"[0-9][^"]*"' "$ROOT/Sources/PortlyCore/Version.swift" | tr -d '"')"
 SPARKLE_ACCOUNT="${PORTLY_SPARKLE_ACCOUNT:-dev.portly.app}"
@@ -76,6 +78,16 @@ for bundle in "$BIN_DIR"/*.bundle; do
   [ -e "$bundle" ] || continue
   cp -R "$bundle" "$APP/Contents/Resources/"
 done
+
+# The downloadable app performs agent setup itself, so it must carry both the
+# distributable skill and a CLI matching the app's architectures.
+cp -R "$ROOT/skills/portly" "$APP/Contents/Resources/portly-skill"
+if [ "$RELEASE" -eq 1 ]; then
+  lipo -create "$ARM64_BIN_DIR/portly" "$X86_64_BIN_DIR/portly" -output "$APP/Contents/Resources/portly-cli"
+else
+  cp "$BIN_DIR/portly" "$APP/Contents/Resources/portly-cli"
+fi
+chmod +x "$APP/Contents/Resources/portly-cli"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -224,7 +236,7 @@ if [ "$INSTALL" -eq 1 ]; then
   done
 
   if [ -n "$CLI_TARGET" ]; then
-    cp "$BIN_DIR/portly" "$CLI_TARGET"
+    cp "$APP/Contents/Resources/portly-cli" "$CLI_TARGET"
     chmod +x "$CLI_TARGET"
     echo "    $CLI_TARGET"
   else

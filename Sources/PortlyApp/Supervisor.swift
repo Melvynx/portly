@@ -2,17 +2,41 @@ import AppKit
 import Foundation
 import PortlyCore
 
+struct ResourceHistoryPoint: Identifiable, Equatable {
+    let id = UUID()
+    let timestamp: Date
+    let footprintBytes: UInt64
+    let residentBytes: UInt64
+    let cpuPercent: Double
+    let processCount: Int
+}
+
+struct ProjectResourceHistoryPoint: Identifiable, Equatable {
+    let id = UUID()
+    let timestamp: Date
+    let projectID: String
+    let projectName: String
+    let colorHex: String
+    let footprintBytes: UInt64
+    let residentBytes: UInt64
+}
+
 /// Owns the config and one `ServerRuntime` per configured server. Single source
 /// of truth for the UI, the control API and the config file.
 final class Supervisor: ObservableObject {
     static let shared = Supervisor()
 
     @Published private(set) var projects: [Project] = []
+    @Published private(set) var resourceHistory: [ResourceHistoryPoint] = []
+    @Published private(set) var projectResourceHistory: [ProjectResourceHistoryPoint] = []
     /// Bumped on any runtime state change so SwiftUI redraws the lists.
     @Published private(set) var revision: Int = 0
 
     private let store: ConfigStore
     private(set) var runtimes: [String: ServerRuntime] = [:]
+    private let metricsQueue = DispatchQueue(label: "dev.melvynx.portly.process-metrics", qos: .utility)
+    private var metricsTimer: Timer?
+    private var metricsSampleInFlight = false
 
     private struct UpdaterRelaunchState: Codable {
         let serverIDs: [String]
@@ -35,6 +59,7 @@ final class Supervisor: ObservableObject {
             self.bump()
         }
         store.startWatching()
+        startMetricsTimer()
     }
 
     // MARK: - Runtime bookkeeping
@@ -71,6 +96,93 @@ final class Supervisor: ObservableObject {
 
     private func bump() {
         revision &+= 1
+    }
+
+    private func startMetricsTimer() {
+        let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
+            self?.refreshProcessMetrics()
+        }
+        metricsTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        refreshProcessMetrics()
+    }
+
+    private func refreshProcessMetrics() {
+        guard !metricsSampleInFlight else { return }
+
+        let targets = runtimes.compactMapValues { runtime in
+            runtime.isRunning ? runtime.pid : nil
+        }
+        for runtime in runtimes.values where !runtime.isRunning {
+            runtime.updateProcessMetrics(nil)
+        }
+        guard !targets.isEmpty else { return }
+
+        metricsSampleInFlight = true
+        let rootProcessIDs = Set(targets.values)
+        metricsQueue.async { [weak self] in
+            let samples = ProcessMetricsSampler.sample(rootProcessIDs: rootProcessIDs)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.metricsSampleInFlight = false
+                for (serverID, sampledPID) in targets {
+                    guard let runtime = self.runtimes[serverID], runtime.pid == sampledPID else { continue }
+                    runtime.updateProcessMetrics(samples[sampledPID])
+                }
+                self.recordResourceHistory(samples: samples, targets: targets)
+            }
+        }
+    }
+
+    private func recordResourceHistory(
+        samples: [Int32: ProcessMetrics],
+        targets: [String: Int32]
+    ) {
+        let now = Date()
+        let point = ResourceHistoryPoint(
+            timestamp: now,
+            footprintBytes: samples.values.reduce(0) { $0 + $1.memoryBytes },
+            residentBytes: samples.values.reduce(0) { $0 + $1.residentMemoryBytes },
+            cpuPercent: samples.values.reduce(0) { $0 + $1.cpuPercent },
+            processCount: samples.values.reduce(0) { $0 + $1.processCount }
+        )
+        resourceHistory.append(point)
+        // Five minutes at the two-second sampling interval is enough to reveal
+        // runaway growth without turning the monitor into another memory sink.
+        if resourceHistory.count > 150 {
+            resourceHistory.removeFirst(resourceHistory.count - 150)
+        }
+
+        struct ProjectTotals {
+            let name: String
+            let colorHex: String
+            var footprintBytes: UInt64 = 0
+            var residentBytes: UInt64 = 0
+        }
+
+        var projectTotals: [String: ProjectTotals] = [:]
+        for (serverID, rootPID) in targets {
+            guard let runtime = runtimes[serverID], let metrics = samples[rootPID] else { continue }
+            let colorHex = projects.first(where: { $0.id == runtime.projectID })?.color ?? "#FF9F0A"
+            var total = projectTotals[runtime.projectID]
+                ?? ProjectTotals(name: runtime.projectName, colorHex: colorHex)
+            total.footprintBytes += metrics.memoryBytes
+            total.residentBytes += metrics.residentMemoryBytes
+            projectTotals[runtime.projectID] = total
+        }
+
+        projectResourceHistory.append(contentsOf: projectTotals.map { projectID, total in
+            ProjectResourceHistoryPoint(
+                timestamp: now,
+                projectID: projectID,
+                projectName: total.name,
+                colorHex: total.colorHex,
+                footprintBytes: total.footprintBytes,
+                residentBytes: total.residentBytes
+            )
+        })
+        let cutoff = now.addingTimeInterval(-300)
+        projectResourceHistory.removeAll { $0.timestamp < cutoff }
     }
 
     func runtime(for id: String) -> ServerRuntime? { runtimes[id] }

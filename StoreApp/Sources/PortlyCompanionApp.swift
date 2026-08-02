@@ -171,6 +171,15 @@ private struct CompanionServerRow: View {
                     if let pid = server.pid {
                         Text("pid \(pid)")
                     }
+                    if let cpu = server.cpuPercent {
+                        Text("\(cpu.formatted(.number.precision(.fractionLength(0))))% CPU")
+                    }
+                    if let memory = server.memoryBytes {
+                        Text("\(ByteCountFormatter.string(fromByteCount: Int64(memory), countStyle: .memory)) footprint")
+                    }
+                    if let resident = server.residentMemoryBytes {
+                        Text("\(ByteCountFormatter.string(fromByteCount: Int64(resident), countStyle: .memory)) resident")
+                    }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)

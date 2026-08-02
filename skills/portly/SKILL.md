@@ -7,6 +7,8 @@ description: Manage persistent local dev servers with the Portly macOS app and C
 
 Use the `portly` CLI as the primary interface. Every command launches Portly.app automatically if needed; this is a state-changing side effect even for `status` when the app was closed.
 
+If `portly` is not available on `PATH`, use the onboarding-installed CLI at `$HOME/.local/bin/portly`, or the copy bundled with the app at `/Applications/Portly.app/Contents/Resources/portly-cli`.
+
 ## Inspect first
 
 Run `portly status --json`. Use an exact server ID or `project/server` when names are ambiguous. Prefer `--json` whenever supported.

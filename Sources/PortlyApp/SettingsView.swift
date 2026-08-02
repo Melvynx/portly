@@ -23,6 +23,7 @@ struct SettingsView: View {
 private struct GeneralSettingsView: View {
     @AppStorage(PortlyPreferences.showMenuBarItemKey) private var showMenuBarItem = true
     @AppStorage(PortlyPreferences.showMenuBarNameKey) private var showMenuBarName = false
+    @AppStorage("agentOnboardingDismissed") private var agentOnboardingDismissed = false
     @State private var launchAtLogin = false
     @State private var loginItemError: String?
 
@@ -70,6 +71,10 @@ private struct GeneralSettingsView: View {
                 LabeledContent("Version", value: appVersion)
                 Button("Check for Updates…") {
                     PortlyUpdater.shared.checkForUpdates()
+                }
+                Button("Show Agent Setup") {
+                    agentOnboardingDismissed = false
+                    WindowOpener.openMainWindow()
                 }
             }
         }

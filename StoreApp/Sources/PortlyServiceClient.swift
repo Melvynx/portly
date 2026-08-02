@@ -23,6 +23,10 @@ struct CompanionServer: Decodable, Identifiable {
     let state: String
     let healthy: Bool
     let pid: Int?
+    let cpuPercent: Double?
+    let memoryBytes: UInt64?
+    let residentMemoryBytes: UInt64?
+    let processCount: Int?
 
     var isRunning: Bool {
         state == "running" || state == "starting" || state == "unhealthy"

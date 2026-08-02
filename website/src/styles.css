@@ -475,12 +475,19 @@ p {
   text-align: start;
   transition:
     border-color 130ms,
-    color 130ms;
+    color 130ms,
+    scale 150ms var(--ease-out-quad);
 }
 
 .copy-line:hover {
   border-color: var(--line-strong);
   color: var(--text);
+}
+
+/* It is a real button, so it answers the press. Wider than a button, so the
+   dip is smaller: the same 3% on a 468px bar would read as a bounce. */
+.copy-line:active {
+  scale: 0.99;
 }
 
 .copy-line code {
