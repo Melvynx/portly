@@ -74,7 +74,7 @@ const modes = {
   with: {
     lines: supervised,
     tally: "1 dev server · 1 bundler · 1 file watcher",
-    verdict: "Every agent read the same running process.",
+    verdict: "Every agent reads the same running process.",
   },
 } as const;
 
@@ -84,8 +84,10 @@ export function DuplicateDemo() {
 
   return (
     /* "rows" reveals the table by printing its rows, rather than sliding the
-       whole block in and then trickling the rows in on top of it. */
-    <div className={`demo demo-${mode}`} data-reveal="rows">
+       whole block in and then trickling the rows in on top of it.
+       The mode rides on a data attribute, not on className: the observer adds
+       .is-in to this same node, and a re-rendered className would wipe it. */
+    <div className="demo" data-mode={mode} data-reveal="rows">
       <div className="demo-head">
         <div className="switch" role="group" aria-label="Comparison">
           {/* One thumb that slides, so the two states read as one control. */}

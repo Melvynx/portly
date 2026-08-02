@@ -664,7 +664,7 @@ p {
   transition: translate 260ms var(--ease-in-out-cubic);
 }
 
-.demo-with .switch-thumb {
+.demo[data-mode="with"] .switch-thumb {
   translate: 100% 0;
 }
 
@@ -702,7 +702,7 @@ p {
   font-size: 11px;
 }
 
-.demo-with .demo-tally {
+.demo[data-mode="with"] .demo-tally {
   color: var(--live);
 }
 
@@ -768,7 +768,7 @@ p {
   text-align: center;
 }
 
-.demo-with .demo-verdict {
+.demo[data-mode="with"] .demo-verdict {
   color: var(--live);
 }
 
