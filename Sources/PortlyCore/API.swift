@@ -114,9 +114,30 @@ public enum PortlyAPI {
         public var port: Int
         public var occupant: PortOccupant?
 
+        private enum CodingKeys: String, CodingKey {
+            case port
+            case occupant
+        }
+
         public init(port: Int, occupant: PortOccupant?) {
             self.port = port
             self.occupant = occupant
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            port = try container.decode(Int.self, forKey: .port)
+            occupant = try container.decodeIfPresent(PortOccupant.self, forKey: .occupant)
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(port, forKey: .port)
+            if let occupant {
+                try container.encode(occupant, forKey: .occupant)
+            } else {
+                try container.encodeNil(forKey: .occupant)
+            }
         }
     }
 

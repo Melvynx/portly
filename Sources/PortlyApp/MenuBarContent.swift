@@ -93,6 +93,9 @@ struct MenuBarContent: View {
                 Text(project.name)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(project.name)
                 Spacer()
                 Button {
                     supervisor.startProject(project.id)

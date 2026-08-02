@@ -158,6 +158,7 @@ final class AgentSetup: ObservableObject {
 struct AgentOnboardingCard: View {
     @ObservedObject var setup: AgentSetup
     let onDismiss: () -> Void
+    @State private var showsSteps = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -186,12 +187,18 @@ struct AgentOnboardingCard: View {
                     Button("Done", action: onDismiss)
                         .buttonStyle(.borderedProminent)
                 } else {
-                    Button("Not now", action: onDismiss)
-                        .buttonStyle(.borderless)
+                    HStack(spacing: 8) {
+                        Button("Not now", action: onDismiss)
+                            .buttonStyle(.borderless)
+                        Button(showsSteps ? "Hide steps" : "Set up") {
+                            withAnimation(Motion.banner) { showsSteps.toggle() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
                 }
             }
 
-            if !setupComplete {
+            if !setupComplete, showsSteps {
                 HStack(spacing: 10) {
                     SetupStep(
                         number: 1,
@@ -219,6 +226,7 @@ struct AgentOnboardingCard: View {
                         .disabled(!setup.skillInstalled || setup.rulesInstalled || setup.isWorking)
                     }
                 }
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
 
             if let error = setup.errorMessage {
@@ -242,6 +250,7 @@ struct AgentOnboardingCard: View {
         .padding(.bottom, 2)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Portly agent setup")
+        .animation(Motion.banner, value: setupComplete)
     }
 
     private var setupComplete: Bool {

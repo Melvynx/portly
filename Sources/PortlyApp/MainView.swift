@@ -317,6 +317,9 @@ private struct ProjectHeader: View {
                 }
             Text(project.name)
                 .font(PortlyTypography.project)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(project.name)
             Spacer()
         }
         .padding(.vertical, 2)
@@ -333,6 +336,8 @@ private struct ServerRow: View {
                 Text(runtime.config.name)
                     .font(PortlyTypography.bodyMedium)
                     .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(runtime.config.name)
                 HStack(spacing: 4) {
                     if let port = runtime.config.port {
                         Text("localhost:\(String(port))")
