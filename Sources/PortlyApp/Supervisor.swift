@@ -130,32 +130,29 @@ final class Supervisor: ObservableObject {
     /// A normal quit never writes the marker and therefore keeps its existing
     /// "quit means stop everything" behavior.
     func prepareForUpdaterRelaunch() {
+        let relaunchState = UpdaterRelaunchStateStore(url: updaterRelaunchStateURL)
         let ids = runtimes.values
             .filter(\.isRunning)
             .map(\.id)
             .sorted()
 
         guard !ids.isEmpty else {
-            try? FileManager.default.removeItem(at: updaterRelaunchStateURL)
+            relaunchState.clear()
             return
         }
 
         do {
             PortlyPaths.ensureDirectories()
-            let data = try JSONEncoder().encode(UpdaterRelaunchState(serverIDs: ids))
-            try data.write(to: updaterRelaunchStateURL, options: .atomic)
+            try relaunchState.save(serverIDs: ids)
         } catch {
             NSLog("[portly] could not save update relaunch state: \(error)")
         }
     }
 
     func resumeAfterUpdaterRelaunchIfNeeded() {
-        let url = updaterRelaunchStateURL
-        guard let data = try? Data(contentsOf: url),
-              let state = try? JSONDecoder().decode(UpdaterRelaunchState.self, from: data)
-        else { return }
-
-        resumeAfterUpdaterRelaunch(serverIDs: state.serverIDs, attemptsRemaining: 50)
+        let relaunchState = UpdaterRelaunchStateStore(url: updaterRelaunchStateURL)
+        guard let serverIDs = relaunchState.consume() else { return }
+        resumeAfterUpdaterRelaunch(serverIDs: serverIDs, attemptsRemaining: 50)
     }
 
     private func resumeAfterUpdaterRelaunch(serverIDs: [String], attemptsRemaining: Int) {
@@ -171,7 +168,6 @@ final class Supervisor: ObservableObject {
         }
 
         guard !waiting.isEmpty, attemptsRemaining > 1 else {
-            try? FileManager.default.removeItem(at: updaterRelaunchStateURL)
             if !waiting.isEmpty {
                 NSLog("[portly] update relaunch timed out waiting for server ports: \(waiting.joined(separator: ", "))")
             }
