@@ -7,19 +7,23 @@ import Sparkle
 final class PortlyUpdater: NSObject, SPUUpdaterDelegate {
     static let shared = PortlyUpdater()
 
-    private(set) lazy var controller = SPUStandardUpdaterController(
-        startingUpdater: true,
-        updaterDelegate: self,
-        userDriverDelegate: nil
-    )
+    private(set) var controller: SPUStandardUpdaterController?
 
     private override init() {
         super.init()
-        _ = controller
+        guard AppBundleRuntime.isApplicationBundle(
+            bundleURL: Bundle.main.bundleURL,
+            bundleIdentifier: Bundle.main.bundleIdentifier
+        ) else { return }
+        controller = SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: self,
+            userDriverDelegate: nil
+        )
     }
 
     func checkForUpdates() {
-        controller.checkForUpdates(nil)
+        controller?.checkForUpdates(nil)
     }
 
     func updaterWillRelaunchApplication(_ updater: SPUUpdater) {

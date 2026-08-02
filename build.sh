@@ -12,6 +12,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIST="$ROOT/dist"
 APP="$DIST/Portly.app"
+BUILD_ROOT="$ROOT/.build"
+TEMP_BUILD_ROOT=""
+TEMP_BUILD_PARENT="${TMPDIR:-/tmp}"
+TEMP_BUILD_PARENT="${TEMP_BUILD_PARENT%/}"
 INSTALL=1
 RUN=0
 FOREVER=0
@@ -28,20 +32,46 @@ for arg in "$@"; do
   esac
 done
 
+# SwiftPM records absolute paths for binary artifacts. A repository moved after
+# a previous build can therefore retain a valid-looking .build directory whose
+# workspace state still points at the old checkout. Keep that cache untouched
+# and use an isolated scratch directory for this build instead. Developers and
+# CI can set PORTLY_SCRATCH_PATH to reuse a known-good cache explicitly.
+WORKSPACE_STATE="$BUILD_ROOT/workspace-state.json"
+if [ -n "${PORTLY_SCRATCH_PATH:-}" ]; then
+  BUILD_ROOT="$PORTLY_SCRATCH_PATH"
+elif [ -f "$WORKSPACE_STATE" ] && ! grep -Fq "\"path\" : \"$BUILD_ROOT/" "$WORKSPACE_STATE"; then
+  TEMP_BUILD_ROOT="$(mktemp -d "$TEMP_BUILD_PARENT/portly-build.XXXXXX")"
+  BUILD_ROOT="$TEMP_BUILD_ROOT"
+  echo "==> Stale SwiftPM cache detected; using $BUILD_ROOT"
+fi
+
+cleanup_temp_build() {
+  if [ -n "$TEMP_BUILD_ROOT" ] && [ -d "$TEMP_BUILD_ROOT" ]; then
+    case "$TEMP_BUILD_ROOT" in
+      "$TEMP_BUILD_PARENT/portly-build."*) rm -rf -- "$TEMP_BUILD_ROOT" ;;
+      *) echo "Refusing to remove unexpected temporary build path: $TEMP_BUILD_ROOT" >&2 ;;
+    esac
+  fi
+}
+trap cleanup_temp_build EXIT
+
+SWIFT_BUILD=(swift build --scratch-path "$BUILD_ROOT")
+
 echo "==> Building (release)"
 cd "$ROOT"
 if [ "$RELEASE" -eq 1 ]; then
-  swift build -c release --triple arm64-apple-macosx14.0 --product PortlyApp
-  swift build -c release --triple x86_64-apple-macosx14.0 --product PortlyApp
-  swift build -c release --triple arm64-apple-macosx14.0 --product portly
-  swift build -c release --triple x86_64-apple-macosx14.0 --product portly
-  ARM64_BIN_DIR="$(swift build -c release --triple arm64-apple-macosx14.0 --show-bin-path)"
-  X86_64_BIN_DIR="$(swift build -c release --triple x86_64-apple-macosx14.0 --show-bin-path)"
+  "${SWIFT_BUILD[@]}" -c release --triple arm64-apple-macosx14.0 --product PortlyApp
+  "${SWIFT_BUILD[@]}" -c release --triple x86_64-apple-macosx14.0 --product PortlyApp
+  "${SWIFT_BUILD[@]}" -c release --triple arm64-apple-macosx14.0 --product portly
+  "${SWIFT_BUILD[@]}" -c release --triple x86_64-apple-macosx14.0 --product portly
+  ARM64_BIN_DIR="$("${SWIFT_BUILD[@]}" -c release --triple arm64-apple-macosx14.0 --show-bin-path)"
+  X86_64_BIN_DIR="$("${SWIFT_BUILD[@]}" -c release --triple x86_64-apple-macosx14.0 --show-bin-path)"
   BIN_DIR="$ARM64_BIN_DIR"
 else
-  swift build -c release --product PortlyApp
-  swift build -c release --product portly
-  BIN_DIR="$(swift build -c release --show-bin-path)"
+  "${SWIFT_BUILD[@]}" -c release --product PortlyApp
+  "${SWIFT_BUILD[@]}" -c release --product portly
+  BIN_DIR="$("${SWIFT_BUILD[@]}" -c release --show-bin-path)"
 fi
 
 VERSION="$(grep -o '"[0-9][^"]*"' "$ROOT/Sources/PortlyCore/Version.swift" | tr -d '"')"
@@ -182,7 +212,7 @@ if [ "$RELEASE" -eq 1 ]; then
   fi
   GENERATE_APPCAST="${PORTLY_GENERATE_APPCAST:-}"
   if [ -z "$GENERATE_APPCAST" ]; then
-    GENERATE_APPCAST="$(find "$ROOT/.build/artifacts" -type f -name generate_appcast -print -quit)"
+    GENERATE_APPCAST="$(find "$BUILD_ROOT/artifacts" -type f -name generate_appcast -print -quit)"
   fi
   if [ -z "$GENERATE_APPCAST" ] || [ ! -x "$GENERATE_APPCAST" ]; then
     echo "Sparkle's generate_appcast tool was not found." >&2

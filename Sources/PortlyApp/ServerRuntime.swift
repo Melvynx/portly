@@ -3,6 +3,18 @@ import Foundation
 import PortlyCore
 import SwiftTerm
 
+enum ProcessExitStatus {
+    /// SwiftTerm's forkpty backend currently forwards the raw waitpid status,
+    /// while its newer subprocess backend forwards the decoded exit code.
+    /// Normalize only values outside the valid process exit-code range so both
+    /// backends produce the same result without changing signal values.
+    static func normalize(_ status: Int32?) -> Int32? {
+        guard let status else { return nil }
+        guard status > Int32(UInt8.max) else { return status }
+        return (status >> 8) & 0xff
+    }
+}
+
 /// Supervises one server: PTY process, terminal, health checks and restarts.
 ///
 /// The terminal view is owned here rather than by the SwiftUI view so scrollback
@@ -469,6 +481,7 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
     func processTerminated(_ source: LocalProcess, exitCode: Int32?) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            let exitCode = ProcessExitStatus.normalize(exitCode)
             self.killWork?.cancel()
             self.killWork = nil
             self.stopHealthTimer()

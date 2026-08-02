@@ -1,12 +1,22 @@
 import Foundation
 import UserNotifications
 
+enum AppBundleRuntime {
+    static func isApplicationBundle(bundleURL: URL, bundleIdentifier: String?) -> Bool {
+        bundleURL.pathExtension == "app" && bundleIdentifier != nil
+    }
+}
+
 /// Only fires for terminal failures. Every automatic restart notifying would be
 /// noise, and noise gets muted, which defeats the point.
 enum Notifications {
     private static var authorized = false
 
     static func requestAuthorization() {
+        guard AppBundleRuntime.isApplicationBundle(
+            bundleURL: Bundle.main.bundleURL,
+            bundleIdentifier: Bundle.main.bundleIdentifier
+        ) else { return }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
             authorized = granted
         }
