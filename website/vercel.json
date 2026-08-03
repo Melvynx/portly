@@ -3,6 +3,16 @@
   "framework": null,
   "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "pnpm build",
+  "rewrites": [
+    {
+      "source": "/stats/script.js",
+      "destination": "https://analytics.melvynx.dev/script.js"
+    },
+    {
+      "source": "/stats/api/send",
+      "destination": "https://analytics.melvynx.dev/api/send"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",

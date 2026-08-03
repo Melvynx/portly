@@ -47,6 +47,16 @@ function PrivacyPolicy() {
       </header>
 
       <section style={sectionStyle}>
+        <h2>Website analytics</h2>
+        <p>
+          The Portly website uses our self-hosted analytics service to measure
+          anonymous page views and aggregate daily visitor counts. It uses no
+          cookies, advertising profiles, session replay, or stable visitor
+          identifier.
+        </p>
+      </section>
+
+      <section style={sectionStyle}>
         <h2>Direct app analytics</h2>
         <p>
           The direct-download Portly app sends two anonymous usage events to our

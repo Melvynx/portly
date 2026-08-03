@@ -51,6 +51,12 @@ function RootLayout() {
     <html lang="en">
       <head>
         <HeadContent />
+        <script
+          defer
+          src="/stats/script.js"
+          data-website-id="f643140d-b584-4501-aa0c-6d97e7673fe3"
+          data-host-url="/stats"
+        />
       </head>
       <body>
         <a className="skip-link" href="#main-content">
