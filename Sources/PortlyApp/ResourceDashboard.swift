@@ -318,11 +318,20 @@ struct ResourceDashboard: View {
     }
 
     private var projectHistory: some View {
-        dashboardSection(
+        let history = supervisor.projectResourceHistory
+        let activeProjects = projectRows
+        let styles = DashboardProjectChartStyleScale.make(
+            history: history,
+            activeProjects: activeProjects.map { project in
+                (id: project.id, name: project.name, colorHex: project.colorHex)
+            }
+        )
+
+        return dashboardSection(
             title: "Project history",
             subtitle: "Spot the project whose footprint keeps climbing"
         ) {
-            if supervisor.projectResourceHistory.count < max(2, projectRows.count * 2) {
+            if history.count < max(2, activeProjects.count * 2) {
                 VStack(spacing: 10) {
                     ProgressView()
                         .controlSize(.small)
@@ -332,39 +341,51 @@ struct ResourceDashboard: View {
                 }
                 .frame(maxWidth: .infinity, minHeight: 220)
             } else {
-                Chart(supervisor.projectResourceHistory) { point in
-                    LineMark(
-                        x: .value("Time", point.timestamp),
-                        y: .value("Footprint", gibibytes(point.footprintBytes)),
-                        series: .value("Project", point.projectName)
+                VStack(alignment: .leading, spacing: 14) {
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 130), alignment: .leading)],
+                        alignment: .leading,
+                        spacing: 8
+                    ) {
+                        ForEach(styles) { style in
+                            legend(style.name, color: Color(hex: style.colorHex))
+                        }
+                    }
+
+                    Chart(history) { point in
+                        LineMark(
+                            x: .value("Time", point.timestamp),
+                            y: .value("Footprint", gibibytes(point.footprintBytes)),
+                            series: .value("Project", point.projectID)
+                        )
+                        .foregroundStyle(by: .value("Project", point.projectID))
+                        .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                    }
+                    .chartForegroundStyleScale(
+                        domain: styles.map(\.id),
+                        range: styles.map { Color(hex: $0.colorHex) }
                     )
-                    .foregroundStyle(by: .value("Project", point.projectName))
-                    .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                }
-                .chartForegroundStyleScale(
-                    domain: projectRows.map(\.name),
-                    range: projectRows.map { Color(hex: $0.colorHex) }
-                )
-                .chartLegend(position: .top, alignment: .leading, spacing: 12)
-                .chartYAxis {
-                    AxisMarks(position: .leading) { value in
-                        AxisGridLine().foregroundStyle(Color.primary.opacity(0.07))
-                        AxisValueLabel {
-                            if let amount = value.as(Double.self) {
-                                Text(amount.formatted(.number.precision(.fractionLength(0...1))) + " GB")
+                    .chartLegend(.hidden)
+                    .chartYAxis {
+                        AxisMarks(position: .leading) { value in
+                            AxisGridLine().foregroundStyle(Color.primary.opacity(0.07))
+                            AxisValueLabel {
+                                if let amount = value.as(Double.self) {
+                                    Text(amount.formatted(.number.precision(.fractionLength(0...1))) + " GB")
+                                }
                             }
                         }
                     }
-                }
-                .chartXAxis {
-                    AxisMarks(values: .automatic(desiredCount: 5)) {
-                        AxisGridLine().foregroundStyle(Color.primary.opacity(0.05))
-                        AxisValueLabel(format: .dateTime.minute().second())
+                    .chartXAxis {
+                        AxisMarks(values: .automatic(desiredCount: 5)) {
+                            AxisGridLine().foregroundStyle(Color.primary.opacity(0.05))
+                            AxisValueLabel(format: .dateTime.minute().second())
+                        }
                     }
+                    .frame(minHeight: 220)
+                    .accessibilityLabel("Memory footprint history by project")
+                    .accessibilityValue("\(styles.count) projects in recent history")
                 }
-                .frame(minHeight: 220)
-                .accessibilityLabel("Memory footprint history by project")
-                .accessibilityValue("\(projectRows.count) active projects")
             }
         }
     }
@@ -546,4 +567,43 @@ private struct DashboardProcessRow: Identifiable {
     let serverName: String
     let serverState: ServerState
     let process: ManagedProcessSnapshot
+}
+
+struct DashboardProjectChartStyle: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let colorHex: String
+}
+
+enum DashboardProjectChartStyleScale {
+    static func make(
+        history: [ProjectResourceHistoryPoint],
+        activeProjects: [(id: String, name: String, colorHex: String)]
+    ) -> [DashboardProjectChartStyle] {
+        var stylesByID: [String: DashboardProjectChartStyle] = [:]
+
+        for point in history {
+            stylesByID[point.projectID] = DashboardProjectChartStyle(
+                id: point.projectID,
+                name: point.projectName,
+                colorHex: point.colorHex
+            )
+        }
+
+        // Current configuration wins when a project was renamed or recolored,
+        // while stopped projects remain in the domain until their history ages out.
+        for project in activeProjects {
+            stylesByID[project.id] = DashboardProjectChartStyle(
+                id: project.id,
+                name: project.name,
+                colorHex: project.colorHex
+            )
+        }
+
+        return stylesByID.values.sorted { lhs, rhs in
+            let nameOrder = lhs.name.localizedStandardCompare(rhs.name)
+            if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+            return lhs.id < rhs.id
+        }
+    }
 }
