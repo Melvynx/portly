@@ -5,6 +5,9 @@ import SwiftUI
 /// Add or edit a project. Standard grouped form, standard sheet buttons.
 struct ProjectForm: View {
     let project: Project?
+    /// Colors already spoken for, so the picker can warn before two projects end up
+    /// with the same line in the resource charts.
+    var takenColors: [String] = []
     let onSave: (String, String, String, String) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -26,8 +29,9 @@ struct ProjectForm: View {
                 }
 
                 Section("Appearance") {
-                    IconColorPicker(icon: $icon, color: $color)
+                    IconColorPicker(icon: $icon, color: $color, takenColors: takenColors)
                 }
+
             }
             .formStyle(.grouped)
 
@@ -38,17 +42,28 @@ struct ProjectForm: View {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button(project == nil ? "Add Project" : "Save") {
-                    onSave(name.trimmingCharacters(in: .whitespaces), root, icon, color)
+                    onSave(
+                        name.trimmingCharacters(in: .whitespaces),
+                        root,
+                        icon,
+                        color
+                    )
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || root.isEmpty)
+                .disabled(
+                    name.trimmingCharacters(in: .whitespaces).isEmpty
+                        || root.isEmpty
+                )
             }
             .padding(14)
         }
         .frame(width: 480)
         .onAppear {
-            guard let project else { return }
+            guard let project else {
+                color = Supervisor.nextColor(excluding: takenColors)
+                return
+            }
             name = project.name
             root = project.root
             icon = project.icon
@@ -73,11 +88,15 @@ struct ProjectForm: View {
 private struct IconColorPicker: View {
     @Binding var icon: String
     @Binding var color: String
+    var takenColors: [String] = []
 
     @State private var hoveredSymbol: String?
 
     private let columns = Array(repeating: GridItem(.fixed(30), spacing: 5), count: 9)
-    private let colorNames = ["Blue", "Green", "Orange", "Pink", "Purple", "Cyan", "Yellow", "Gray"]
+
+    private var taken: Set<String> {
+        Set(takenColors.map { $0.uppercased() }).subtracting([color.uppercased()])
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
@@ -102,12 +121,17 @@ private struct IconColorPicker: View {
 
                     HStack(spacing: 7) {
                         ForEach(Array(Supervisor.palette.enumerated()), id: \.element) { index, hex in
+                            let name = Supervisor.paletteNames[index]
+                            let isTaken = taken.contains(hex.uppercased())
                             Button {
                                 color = hex
                             } label: {
                                 Circle()
                                     .fill(Color(hex: hex))
                                     .frame(width: 18, height: 18)
+                                    // A taken color stays selectable, it just stops
+                                    // looking like a fresh one.
+                                    .opacity(isTaken ? 0.3 : 1)
                                     .padding(4)
                                     .background {
                                         Circle()
@@ -119,9 +143,13 @@ private struct IconColorPicker: View {
                                     .contentShape(Circle())
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel(colorNames[index])
-                            .accessibilityValue(color == hex ? "Selected" : "")
-                            .help(colorNames[index])
+                            .accessibilityLabel(name)
+                            .accessibilityValue(
+                                [color == hex ? "Selected" : nil, isTaken ? "Already used" : nil]
+                                    .compactMap { $0 }
+                                    .joined(separator: ", ")
+                            )
+                            .help(isTaken ? "\(name), already used by another project" : name)
                         }
                     }
                 }
@@ -181,9 +209,10 @@ struct ServerForm: View {
     }
 
     let server: ServerConfig?
+    let projectID: String
     let projectName: String
     let projectRoot: String
-    let onSave: (ServerConfig) -> Void
+    let onSave: (ServerConfig, MemoryLimitMode, UInt64?) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var supervisor: Supervisor
@@ -199,6 +228,10 @@ struct ServerForm: View {
     @State private var isDetecting = true
     @State private var selectedSuggestionID: String?
     @State private var advancedExpanded = false
+    @State private var memoryLimitMode: MemoryLimitMode = .inherit
+    @State private var memoryLimit = "5GB"
+    @State private var showMemoryLimitError = false
+    @FocusState private var memoryLimitFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -224,10 +257,7 @@ struct ServerForm: View {
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button(server == nil ? "Add Server" : "Save") {
-                    onSave(build())
-                    dismiss()
-                }
+                Button(server == nil ? "Add Server" : "Save", action: save)
                 .keyboardShortcut(.defaultAction)
                 .disabled(!canSave)
             }
@@ -306,6 +336,33 @@ struct ServerForm: View {
             Toggle("Restart automatically when it crashes", isOn: $autoRestart)
         }
 
+        Section("Project memory guard") {
+            Picker("Policy", selection: $memoryLimitMode) {
+                Text("Use global default").tag(MemoryLimitMode.inherit)
+                Text("Turn off for this project").tag(MemoryLimitMode.disabled)
+                Text("Set a custom limit").tag(MemoryLimitMode.custom)
+            }
+
+            if memoryLimitMode == .custom {
+                TextField("Limit", text: $memoryLimit)
+                    .focused($memoryLimitFocused)
+                    .help("For example 5GB or 5Go")
+                    .accessibilityHint(memoryLimitMessage)
+
+                Text(memoryLimitMessage)
+                    .font(.caption)
+                    .foregroundStyle(showMemoryLimitError && parsedMemoryLimit == nil ? Color.red : Color.secondary)
+            } else if memoryLimitMode == .inherit {
+                Text(globalMemoryLimitMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("This policy applies to the total footprint of every running server in \(projectName).")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
         Section {
             DisclosureGroup("Advanced options", isExpanded: $advancedExpanded) {
                 TextField("Directory", text: $directory)
@@ -365,6 +422,15 @@ struct ServerForm: View {
             setupMode = .manual
             isDetecting = false
         }
+
+        if let project = supervisor.projects.first(where: { $0.id == projectID }) {
+            memoryLimitMode = project.memoryLimitMode
+            let bytes = project.memoryLimitBytes ?? supervisor.settings.globalMemoryLimitBytes
+            if let bytes {
+                memoryLimit = MemorySize.display(bytes).replacingOccurrences(of: " ", with: "")
+            }
+        }
+
         guard let server else { return }
         name = server.name
         command = server.command
@@ -374,6 +440,37 @@ struct ServerForm: View {
         autoRestart = server.autoRestart
         envText = server.env.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "\n")
         advancedExpanded = !(directory.isEmpty && healthURL.isEmpty && envText.isEmpty)
+    }
+
+    private var parsedMemoryLimit: UInt64? {
+        MemorySize.parse(memoryLimit)
+    }
+
+    private var memoryLimitMessage: String {
+        if showMemoryLimitError, parsedMemoryLimit == nil {
+            return "Enter a size of at least 64 MB, for example 5GB."
+        }
+        return "Examples: 512MB, 5GB, or 5Go. Minimum: 64 MB."
+    }
+
+    private var globalMemoryLimitMessage: String {
+        supervisor.settings.globalMemoryLimitBytes.map {
+            "The current global default is \(MemorySize.display($0))."
+        } ?? "The global default is off, so automatic memory restarts are currently disabled."
+    }
+
+    private func save() {
+        if memoryLimitMode == .custom, parsedMemoryLimit == nil {
+            showMemoryLimitError = true
+            memoryLimitFocused = true
+            return
+        }
+        onSave(
+            build(),
+            memoryLimitMode,
+            memoryLimitMode == .custom ? parsedMemoryLimit : nil
+        )
+        dismiss()
     }
 
     private func build() -> ServerConfig {
@@ -432,4 +529,113 @@ private struct SuggestionRow: View {
         .buttonStyle(.plain)
         .accessibilityValue(isSelected ? "Selected" : "")
     }
+}
+
+/// Launches an ephemeral process without adding permanent project or server
+/// configuration. It intentionally asks for only the fields useful to a small
+/// preview or one-off task.
+struct TemporaryProcessForm: View {
+    let onRun: (String, String, String, Int?, String?, Int) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = "Temporary process"
+    @State private var command = ""
+    @State private var directory = FileManager.default.homeDirectoryForCurrentUser.path
+    @State private var portText = ""
+    @State private var healthURL = ""
+    @State private var timeoutText = "30m"
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    Label {
+                        Text("Temporary jobs run in the background, stop their full process group at the timeout, and keep their result for one hour.")
+                    } icon: {
+                        Image(systemName: "clock.badge")
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    .font(PortlyTypography.body)
+
+                    Text("For long-lived or reusable work, create a project instead.")
+                        .font(PortlyTypography.metadata)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Process") {
+                    TextField("Name", text: $name)
+                    TextField("Command", text: $command, axis: .vertical)
+                        .font(.system(size: 12, design: .monospaced))
+                        .lineLimit(2...5)
+
+                    HStack {
+                        TextField("Working directory", text: $directory)
+                            .font(.system(size: 12, design: .monospaced))
+                        Button("Choose…", action: chooseDirectory)
+                    }
+                }
+
+                Section("Monitoring") {
+                    TextField("Timeout (for example 30s, 10m, 2h)", text: $timeoutText)
+                        .textFieldStyle(.roundedBorder)
+                    TextField("Port", text: $portText)
+                        .textFieldStyle(.roundedBorder)
+                    TextField("Health path or URL", text: $healthURL)
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+            .formStyle(.grouped)
+
+            Divider()
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Run Temporary") {
+                    if let timeoutSeconds = TemporaryTimeout.parse(timeoutText) {
+                        onRun(
+                            name.trimmingCharacters(in: .whitespacesAndNewlines),
+                            command.trimmingCharacters(in: .whitespacesAndNewlines),
+                            NSString(string: directory).expandingTildeInPath,
+                            Int(portText.trimmingCharacters(in: .whitespacesAndNewlines)),
+                            healthURL.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+                            timeoutSeconds
+                        )
+                    }
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(!canRun)
+            }
+            .padding(14)
+        }
+        .frame(width: 540)
+    }
+
+    private var canRun: Bool {
+        let resolvedDirectory = NSString(string: directory).expandingTildeInPath
+        var isDirectory: ObjCBool = false
+        return !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && FileManager.default.fileExists(atPath: resolvedDirectory, isDirectory: &isDirectory)
+            && isDirectory.boolValue
+            && TemporaryTimeout.parse(timeoutText) != nil
+            && (portText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || Int(portText) != nil)
+    }
+
+    private func chooseDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: NSString(string: directory).expandingTildeInPath)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        directory = url.path
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

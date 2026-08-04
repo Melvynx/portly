@@ -1,1 +1,1 @@
-public let portlyVersion = "0.1.10"
+public let portlyVersion = "0.1.11"

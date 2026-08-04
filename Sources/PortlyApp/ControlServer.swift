@@ -112,6 +112,14 @@ final class ControlServer {
                 }
                 return (200, try ok(PortlyAPI.LogsResponse(server: runtime.config.name, lines: runtime.logTail(tail))))
 
+            case ("GET", "/temporary/status"):
+                let id = request.query["id"] ?? ""
+                guard supervisor.temporaryRuntimeIDs.contains(id),
+                      let job = supervisor.runtime(for: id)?.temporaryJobStatus else {
+                    return (404, try fail("No temporary job matching '\(id)'"))
+                }
+                return (200, try ok(job))
+
             case ("POST", "/projects/add"):
                 let body: PortlyAPI.AddProjectRequest = try request.decode()
                 let root = NSString(string: body.root).expandingTildeInPath
@@ -122,7 +130,18 @@ final class ControlServer {
                 if supervisor.resolveProject(body.name) != nil {
                     return (400, try fail("A project named '\(body.name)' already exists"))
                 }
-                let project = supervisor.addProject(name: body.name, root: root, icon: body.icon, color: body.color)
+                let memoryLimitMode = body.memoryLimitMode ?? .inherit
+                if memoryLimitMode == .custom, !validMemoryLimit(body.memoryLimitBytes) {
+                    return (400, try fail("Custom memory limit must be between 128 MB and 1 TB"))
+                }
+                let project = supervisor.addProject(
+                    name: body.name,
+                    root: root,
+                    icon: body.icon,
+                    color: body.color,
+                    memoryLimitMode: memoryLimitMode,
+                    memoryLimitBytes: body.memoryLimitBytes
+                )
                 return (200, try ok(project))
 
             case ("POST", "/projects/remove"):
@@ -160,6 +179,85 @@ final class ControlServer {
                 supervisor.addServer(projectID: project.id, server: server)
                 if body.start == true { supervisor.start(serverID: server.id) }
                 return (200, try ok(server))
+
+            case ("POST", "/temporary/run"):
+                let body: PortlyAPI.RunTemporaryRequest = try request.decode()
+                let name = body.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                let command = body.command.trimmingCharacters(in: .whitespacesAndNewlines)
+                let directory = NSString(string: body.directory).expandingTildeInPath
+                let timeoutSeconds = body.timeoutSeconds ?? TemporaryTimeout.defaultSeconds
+                guard !name.isEmpty else { return (400, try fail("Temporary process name cannot be empty")) }
+                guard !command.isEmpty else { return (400, try fail("Temporary command cannot be empty")) }
+                guard (1...TemporaryTimeout.maximumSeconds).contains(timeoutSeconds) else {
+                    return (400, try fail("Timeout must be between 1 second and 7 days"))
+                }
+                var isDirectory: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: directory, isDirectory: &isDirectory), isDirectory.boolValue else {
+                    return (400, try fail("Directory does not exist: \(directory)"))
+                }
+                if let port = body.port {
+                    if let conflict = supervisor.server(configuredOn: port) {
+                        let next = supervisor.nextAvailablePort(startingAt: port + 1)
+                        return (400, try fail(
+                            "Port \(port) is configured for \(conflict.project.name)/\(conflict.server.name). Try \(next)."
+                        ))
+                    }
+                    if let occupant = supervisor.occupant(of: port) {
+                        return (400, try fail(
+                            "Port \(port) is already used by \(occupant.command) (pid \(occupant.pid))"
+                        ))
+                    }
+                }
+                let runtime = supervisor.runTemporary(
+                    name: name,
+                    command: command,
+                    directory: directory,
+                    port: body.port,
+                    env: body.env ?? [:],
+                    healthURL: body.healthURL,
+                    healthStatus: body.healthStatus,
+                    timeoutSeconds: timeoutSeconds
+                )
+                guard let job = runtime.temporaryJobStatus else {
+                    return (500, try fail("Temporary job metadata was not created"))
+                }
+                return (200, try ok(job))
+
+            case ("POST", "/memory-limit"):
+                let body: PortlyAPI.UpdateMemoryLimitRequest = try request.decode()
+                if let query = body.project {
+                    guard let project = supervisor.resolveProject(query) else {
+                        return (404, try fail("No project matching '\(query)'"))
+                    }
+                    if body.mode == .custom, !validMemoryLimit(body.bytes) {
+                        return (400, try fail("Custom memory limit must be between 128 MB and 1 TB"))
+                    }
+                    supervisor.updateProjectMemoryLimit(
+                        projectID: project.id,
+                        mode: body.mode,
+                        bytes: body.bytes
+                    )
+                    let value = body.mode == .custom
+                        ? MemorySize.display(body.bytes!)
+                        : body.mode.rawValue
+                    return (200, try ok(PortlyAPI.ActionResponse(
+                        affected: [project.id],
+                        message: "Memory limit for \(project.name): \(value)"
+                    )))
+                }
+
+                guard body.mode != .inherit else {
+                    return (400, try fail("The global memory limit can be a size or off, not inherit"))
+                }
+                if body.mode == .custom, !validMemoryLimit(body.bytes) {
+                    return (400, try fail("Global memory limit must be between 128 MB and 1 TB"))
+                }
+                supervisor.updateGlobalMemoryLimit(body.mode == .custom ? body.bytes : nil)
+                let value = body.mode == .custom ? MemorySize.display(body.bytes!) : "off"
+                return (200, try ok(PortlyAPI.ActionResponse(
+                    affected: [],
+                    message: "Global project memory limit: \(value)"
+                )))
 
             case ("POST", "/servers/update"):
                 let body: PortlyAPI.UpdateServerRequest = try request.decode()
@@ -217,15 +315,26 @@ final class ControlServer {
                 guard let occupant = supervisor.occupant(of: body.port) else {
                     return (404, try fail("Nothing is listening on port \(body.port)"))
                 }
-                PortInspector.kill(pid: occupant.pid)
-                return (200, try ok(PortlyAPI.ActionResponse(
-                    affected: [String(occupant.pid)],
-                    message: "Sent SIGTERM to \(occupant.command) (pid \(occupant.pid)) on port \(body.port)"
-                )))
+                switch PortInspector.stopOccupant(of: body.port, expectedPID: occupant.pid) {
+                case .success(let outcome):
+                    return (200, try ok(PortlyAPI.ActionResponse(
+                        affected: outcome.dockerContainer.map { [$0.id] } ?? [String(occupant.pid)],
+                        message: "Stopped \(outcome.description) on port \(body.port)"
+                    )))
+                case .failure(let error):
+                    return (400, try fail(error.localizedDescription))
+                }
 
             case ("POST", "/open"):
+                let body: PortlyAPI.OpenRequest = try request.decode()
+                if body.destination == "resources" {
+                    AppSelection.shared.pending = .resources
+                } else if body.destination == "ports" {
+                    AppSelection.shared.pending = .ports
+                }
                 WindowOpener.openMainWindow()
-                return (200, try ok(PortlyAPI.ActionResponse(affected: [], message: "Opened Portly")))
+                let destination = body.destination.map { " on \($0)" } ?? ""
+                return (200, try ok(PortlyAPI.ActionResponse(affected: [], message: "Opened Portly\(destination)")))
 
             case ("POST", "/quit"):
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
@@ -279,6 +388,11 @@ final class ControlServer {
         case "restart": runtime.restart()
         default: break
         }
+    }
+
+    private func validMemoryLimit(_ bytes: UInt64?) -> Bool {
+        guard let bytes else { return false }
+        return (MemorySize.minimumLimitBytes...MemorySize.maximumLimitBytes).contains(bytes)
     }
 
     // MARK: - Encoding

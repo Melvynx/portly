@@ -4,6 +4,28 @@ import PortlyCore
 /// Finds who is listening on a port. Portly never kills anything on its own:
 /// this only reports, and the kill is an explicit user or agent action.
 enum PortInspector {
+    struct StopOutcome: Equatable {
+        let description: String
+        let processID: Int32?
+        let dockerContainer: DockerPublishedContainer?
+    }
+
+    enum StopError: LocalizedError {
+        case portFree
+        case listenerChanged
+        case processRefused(Int32)
+        case docker(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .portFree: return "The port is already free."
+            case .listenerChanged: return "The listener changed before Portly could stop it. Refresh and try again."
+            case .processRefused(let pid): return "Process \(pid) refused the stop request."
+            case .docker(let message): return message
+            }
+        }
+    }
+
     struct Listener: Identifiable, Hashable {
         let port: Int
         let pid: Int32
@@ -103,9 +125,69 @@ enum PortInspector {
         occupant(of: port) != nil
     }
 
+    /// Lightweight listener map used by the resource sampler to tell whether a
+    /// heavy process (or one of its descendants) is an actual server that can
+    /// be moved under Portly.
+    static func listenerPortsByPID() -> [Int32: Set<Int>] {
+        let output = run("/usr/sbin/lsof", ["-nP", "-iTCP", "-sTCP:LISTEN", "-Fpn"])
+        guard !output.isEmpty else { return [:] }
+
+        var result: [Int32: Set<Int>] = [:]
+        var pid: Int32?
+        for line in output.split(separator: "\n") {
+            guard let tag = line.first else { continue }
+            let value = String(line.dropFirst())
+            switch tag {
+            case "p": pid = Int32(value)
+            case "n":
+                if let pid, let port = portNumber(from: value) {
+                    result[pid, default: []].insert(port)
+                }
+            default: break
+            }
+        }
+        return result
+    }
+
     @discardableResult
     static func kill(pid: Int32, force: Bool = false) -> Bool {
         Darwin.kill(pid, force ? SIGKILL : SIGTERM) == 0
+    }
+
+    /// Stops the real owner of a host port. Docker Desktop exposes every
+    /// published container through one global backend process, so killing the
+    /// listener PID would restart or destabilize Docker itself. In that case we
+    /// stop only the container publishing this exact port.
+    static func stopOccupant(
+        of port: Int,
+        expectedPID: Int32? = nil
+    ) -> Result<StopOutcome, StopError> {
+        guard let occupant = occupant(of: port) else { return .failure(.portFree) }
+        if let expectedPID, occupant.pid != expectedPID { return .failure(.listenerChanged) }
+
+        if let container = DockerPortInspector.container(publishing: port) {
+            switch DockerPortInspector.stop(container) {
+            case .success:
+                return .success(
+                    StopOutcome(
+                        description: "Docker container \(container.displayName)",
+                        processID: nil,
+                        dockerContainer: container
+                    )
+                )
+            case .failure(let error):
+                return .failure(.docker(error.localizedDescription))
+            }
+        }
+
+        guard kill(pid: occupant.pid) else { return .failure(.processRefused(occupant.pid)) }
+        return .success(
+            StopOutcome(
+                description: "\(occupant.command) (pid \(occupant.pid))",
+                processID: occupant.pid,
+                dockerContainer: nil
+            )
+        )
     }
 
     private static func portNumber(from endpoint: String) -> Int? {
@@ -116,7 +198,7 @@ enum PortInspector {
         return port
     }
 
-    private static func workingDirectories(for pids: Set<Int32>) -> [Int32: String] {
+    static func workingDirectories(for pids: Set<Int32>) -> [Int32: String] {
         guard !pids.isEmpty else { return [:] }
         let list = pids.sorted().map(String.init).joined(separator: ",")
         let output = run("/usr/sbin/lsof", ["-a", "-d", "cwd", "-p", list, "-Fpn"])

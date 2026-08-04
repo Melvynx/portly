@@ -5,11 +5,12 @@ import SwiftUI
 /// The terminal plus everything you need to act on one server.
 struct ServerDetail: View {
     @ObservedObject var runtime: ServerRuntime
-    let onEdit: () -> Void
+    let onEdit: (() -> Void)?
 
     @EnvironmentObject private var supervisor: Supervisor
     @State private var conflict: PortOccupant?
     @State private var showsResources = false
+    @State private var conflictActionError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -80,37 +81,75 @@ struct ServerDetail: View {
                         .help("Clear the terminal")
                 }
 
-                Button(action: onEdit) { Label("Edit", systemImage: "slider.horizontal.3") }
-                    .help("Edit this server")
+                if let onEdit {
+                    Button(action: onEdit) { Label("Edit", systemImage: "slider.horizontal.3") }
+                        .help("Edit this server")
+                }
             }
         }
         .navigationTitle(runtime.config.name)
         .navigationSubtitle(runtime.projectName)
         .onAppear(perform: refreshConflict)
         .onChange(of: runtime.state) { refreshConflict() }
+        .alert("Unable to stop port owner", isPresented: Binding(
+            get: { conflictActionError != nil },
+            set: { if !$0 { conflictActionError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(conflictActionError ?? "The port owner could not be stopped.")
+        }
     }
 
     private var stoppedState: some View {
         VStack(spacing: 12) {
-            Image(systemName: "terminal")
+            Image(systemName: stoppedIcon)
                 .font(.system(size: 32, weight: .light))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(runtime.temporaryJobStatus?.state == .succeeded ? Color.green : Color.secondary)
 
             VStack(spacing: 4) {
-                Text("Server is stopped")
+                Text(stoppedTitle)
                     .font(PortlyTypography.title)
-                Text("Start \(runtime.config.name) to see its live terminal output.")
+                Text(stoppedMessage)
                     .font(PortlyTypography.body)
                     .foregroundStyle(.secondary)
             }
 
-            Button("Start", systemImage: "play.fill") {
+            Button(runtime.isTemporaryJob ? "Run Again" : "Start", systemImage: "play.fill") {
                 runtime.start()
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var stoppedIcon: String {
+        switch runtime.temporaryJobStatus?.state {
+        case .succeeded: return "checkmark.circle"
+        case .failed, .timedOut: return "xmark.circle"
+        default: return "terminal"
+        }
+    }
+
+    private var stoppedTitle: String {
+        guard let job = runtime.temporaryJobStatus else { return "Server is stopped" }
+        switch job.state {
+        case .succeeded: return "Job succeeded"
+        case .failed: return "Job failed"
+        case .timedOut: return "Job timed out"
+        case .stopped: return "Job stopped"
+        case .running: return "Job is running"
+        }
+    }
+
+    private var stoppedMessage: String {
+        guard let job = runtime.temporaryJobStatus else {
+            return "Start \(runtime.config.name) to see its live terminal output."
+        }
+        let duration = job.elapsedSeconds.map { String(format: "%.1f seconds", $0) } ?? "an unknown duration"
+        let exitCode = job.exitCode.map { " with exit code \($0)" } ?? ""
+        return "Finished in \(duration)\(exitCode). Its captured output remains available here for one hour."
     }
 
     // MARK: - Info bar
@@ -128,6 +167,9 @@ struct ServerDetail: View {
                 }
                 if let startedAt = runtime.startedAt, runtime.isRunning {
                     fact("Up \(startedAt.compactUptime)", systemImage: "clock")
+                }
+                if let job = runtime.temporaryJobStatus {
+                    fact(jobFact(job), systemImage: job.state == .running ? "timer" : "checkmark.circle")
                 }
                 if runtime.restartCount > 0 {
                     fact(
@@ -215,6 +257,16 @@ struct ServerDetail: View {
             .monospacedDigit()
     }
 
+    private func jobFact(_ job: TemporaryJobStatus) -> String {
+        switch job.state {
+        case .running: return "Timeout \(TemporaryTimeout.display(job.timeoutSeconds))"
+        case .succeeded: return "Succeeded"
+        case .failed: return job.exitCode.map { "Failed · exit \($0)" } ?? "Failed"
+        case .timedOut: return "Timed out · \(TemporaryTimeout.display(job.timeoutSeconds))"
+        case .stopped: return "Stopped"
+        }
+    }
+
     private func compactResource(
         value: String,
         systemImage: String,
@@ -243,26 +295,53 @@ struct ServerDetail: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 1) {
-                Text("Running outside Portly")
+                Text(occupant.dockerContainerID == nil ? "Running outside Portly" : "Docker container outside Portly")
                     .font(.system(size: 12, weight: .medium))
-                Text("\(occupant.command) (pid \(String(occupant.pid))) is using port \(String(occupant.port)).")
+                Text(conflictDescription(occupant))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
             }
             Spacer()
-            Button("Stop process") {
-                PortInspector.kill(pid: occupant.pid)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: refreshConflict)
+            Button(occupant.dockerContainerID == nil ? "Stop process" : "Stop container") {
+                stopConflictOwner(occupant)
             }
             .controlSize(.small)
             Button("Move to Portly") {
                 if runtime.takeOverPort() { conflict = nil }
             }
             .controlSize(.small)
+            .help("Stop the current owner safely, then start \(runtime.projectName) / \(runtime.config.name) under Portly")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 7)
         .background(Color.orange.opacity(0.12))
+    }
+
+    private func conflictDescription(_ occupant: PortOccupant) -> String {
+        if let name = occupant.dockerContainerName {
+            let service = [occupant.dockerComposeProject, occupant.dockerComposeService]
+                .compactMap { $0 }
+                .joined(separator: " / ")
+            let identity = service.isEmpty ? name : service
+            return "\(identity) publishes port \(occupant.port) through Docker Desktop (backend pid \(occupant.pid))."
+        }
+        return "\(occupant.command) (pid \(occupant.pid)) is using port \(occupant.port)."
+    }
+
+    private func stopConflictOwner(_ occupant: PortOccupant) {
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                PortInspector.stopOccupant(of: occupant.port, expectedPID: occupant.pid)
+            }.value
+            switch result {
+            case .success:
+                try? await Task.sleep(for: .milliseconds(500))
+                refreshConflict()
+            case .failure(let error):
+                conflictActionError = error.localizedDescription
+            }
+        }
     }
 
     /// Only interesting when our own server is not the listener.

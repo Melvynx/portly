@@ -256,24 +256,40 @@ if [ "$INSTALL" -eq 1 ]; then
   echo "    $SKILL_TARGET"
 
   AGENTS_FILE="$HOME/.agents/AGENTS.md"
-  if [ ! -f "$AGENTS_FILE" ] || ! grep -Eiq 'use[^[:alnum:]]+Portly|portly:managed-rule:start' "$AGENTS_FILE"; then
-    mkdir -p "$(dirname "$AGENTS_FILE")"
-    if [ -s "$AGENTS_FILE" ]; then
-      printf '\n' >> "$AGENTS_FILE"
-    fi
-    cat >> "$AGENTS_FILE" <<'RULE'
+  mkdir -p "$(dirname "$AGENTS_FILE")"
+  RULE_SNIPPET="$(mktemp "${TMPDIR:-/tmp}/portly-rule.XXXXXX")"
+  cat > "$RULE_SNIPPET" <<'RULE'
 <!-- portly:managed-rule:start -->
 ## Development servers
 
 - Always use Portly (`portly ...`) to start, stop, restart, inspect, or keep local development servers running.
-- Start with `portly status --json`. Reuse a healthy managed server; if an in-scope server is running outside Portly, register it and use `portly take-over <project/server> --json`.
+- Start with `portly status`. Use `portly status --details` only for the full inventory and metrics, and `--json` only for machine-readable fields. Reuse a healthy managed server; if an in-scope server is running outside Portly, register it and use `portly take-over <project/server> --json`.
+- For long-lived or reusable work, create a project and server.
+- For builds, tests, code generation, previews, demos, and other bounded one-off work, run `job_id="$(portly temp '<command>' --path <folder> --timeout 30m)"`, then `portly wait "$job_id"`. `temp` returns immediately with an ID; `wait` prints captured logs and exits with the command's real code. A timeout kills the whole process group and exits with code `124`.
 - Never launch persistent development servers directly, in the background, or through another supervisor.
 <!-- portly:managed-rule:end -->
 RULE
-    echo "    $AGENTS_FILE (Portly rules added)"
+
+  if [ -f "$AGENTS_FILE" ] && grep -q 'portly:managed-rule:start' "$AGENTS_FILE" && grep -q 'portly:managed-rule:end' "$AGENTS_FILE"; then
+    UPDATED_RULES="$(mktemp "${TMPDIR:-/tmp}/portly-agents.XXXXXX")"
+    awk -v rule_file="$RULE_SNIPPET" '
+      /<!-- portly:managed-rule:start -->/ {
+        while ((getline line < rule_file) > 0) print line
+        close(rule_file)
+        replacing = 1
+        next
+      }
+      replacing && /<!-- portly:managed-rule:end -->/ { replacing = 0; next }
+      !replacing { print }
+    ' "$AGENTS_FILE" > "$UPDATED_RULES"
+    mv "$UPDATED_RULES" "$AGENTS_FILE"
+    echo "    $AGENTS_FILE (Portly rules updated)"
   else
-    echo "    $AGENTS_FILE (Portly rules already present)"
+    if [ -s "$AGENTS_FILE" ]; then printf '\n' >> "$AGENTS_FILE"; fi
+    cat "$RULE_SNIPPET" >> "$AGENTS_FILE"
+    echo "    $AGENTS_FILE (Portly rules added)"
   fi
+  trash "$RULE_SNIPPET"
 fi
 
 if [ "$FOREVER" -eq 1 ]; then

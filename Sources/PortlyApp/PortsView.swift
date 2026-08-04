@@ -82,7 +82,10 @@ struct PortsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: { port in
-            Text("This sends SIGTERM to process \(String(port.pid)). Every port opened by that process will close.")
+            Text(
+                "Portly revalidates the listener before stopping it. Regular processes receive SIGTERM; "
+                    + "if Docker publishes this port, only that container is stopped—not Docker Desktop."
+            )
         }
         .alert("Unable to stop process", isPresented: Binding(
             get: { model.actionError != nil },
@@ -657,11 +660,11 @@ final class ActivePortsModel: ObservableObject {
             }
             runtime.stop()
         case .external:
-            let stopped = await Task.detached(priority: .userInitiated) {
-                PortInspector.kill(pid: port.pid)
+            let result = await Task.detached(priority: .userInitiated) {
+                PortInspector.stopOccupant(of: port.port, expectedPID: port.pid)
             }.value
-            if !stopped {
-                actionError = "Process \(port.pid) did not accept the stop request. Check its permissions and try again."
+            if case .failure(let error) = result {
+                actionError = error.localizedDescription
                 return
             }
         case .portly, .system:

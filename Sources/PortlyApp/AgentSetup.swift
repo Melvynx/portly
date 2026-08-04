@@ -35,7 +35,7 @@ final class AgentSetup: ObservableObject {
 
     func refresh() {
         skillInstalled = fileManager.fileExists(atPath: skillDirectory.appendingPathComponent("SKILL.md").path)
-        rulesInstalled = globalRuleFiles.allSatisfy(hasPortlyRule)
+        rulesInstalled = globalRuleFiles.allSatisfy(hasCurrentPortlyRule)
     }
 
     func installSkill() {
@@ -62,22 +62,18 @@ final class AgentSetup: ObservableObject {
 
     func installGlobalRules() {
         perform {
-            for configuredFile in globalRuleFiles where !hasPortlyRule(configuredFile) {
+            for configuredFile in globalRuleFiles {
                 let file = configuredFile.resolvingSymlinksInPath()
                 try fileManager.createDirectory(
                     at: file.deletingLastPathComponent(),
                     withIntermediateDirectories: true
                 )
 
-                var contents = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
-                if !contents.isEmpty, !contents.hasSuffix("\n") {
-                    contents += "\n"
+                let contents = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+                let updated = Self.installManagedRule(in: contents)
+                if updated != contents {
+                    try updated.write(to: file, atomically: true, encoding: .utf8)
                 }
-                if !contents.isEmpty {
-                    contents += "\n"
-                }
-                contents += Self.managedRule
-                try contents.write(to: file, atomically: true, encoding: .utf8)
             }
         }
     }
@@ -97,12 +93,12 @@ final class AgentSetup: ObservableObject {
         }
     }
 
-    private func hasPortlyRule(_ file: URL) -> Bool {
+    private func hasCurrentPortlyRule(_ file: URL) -> Bool {
         guard let contents = try? String(contentsOf: file.resolvingSymlinksInPath(), encoding: .utf8) else {
             return false
         }
         return contents.contains("portly:managed-rule:start")
-            || contents.localizedCaseInsensitiveContains("Always use Portly")
+            && contents.contains("exits with code `124`")
     }
 
     private var bundledSkillDirectory: URL? {
@@ -141,10 +137,30 @@ final class AgentSetup: ObservableObject {
     ## Development servers
 
     - Always use Portly (`portly ...`) to start, stop, restart, inspect, or keep local development servers running.
-    - Start with `portly status --json`. Reuse a healthy managed server; if an in-scope server is running outside Portly, register it and use `portly take-over <project/server> --json`.
+    - Start with `portly status`. Use `portly status --details` only for the full inventory and metrics, and `--json` only for machine-readable fields. Reuse a healthy managed server; if an in-scope server is running outside Portly, register it and use `portly take-over <project/server> --json`.
+    - For long-lived or reusable work, create a project and server.
+    - For builds, tests, code generation, previews, demos, and other bounded one-off work, run `job_id="$(portly temp '<command>' --path <folder> --timeout 30m)"`, then `portly wait "$job_id"`. `temp` returns immediately with an ID; `wait` prints captured logs and exits with the command's real code. A timeout kills the whole process group and exits with code `124`.
     - Never launch persistent development servers directly, in the background, or through another supervisor.
     <!-- portly:managed-rule:end -->
     """
+
+    static func installManagedRule(in contents: String) -> String {
+        let startMarker = "<!-- portly:managed-rule:start -->"
+        let endMarker = "<!-- portly:managed-rule:end -->"
+        if let start = contents.range(of: startMarker),
+           let end = contents.range(of: endMarker, range: start.lowerBound..<contents.endIndex) {
+            var updated = contents
+            updated.replaceSubrange(start.lowerBound..<end.upperBound, with: managedRule)
+            return updated
+        }
+
+        var updated = contents
+        if !updated.isEmpty, !updated.hasSuffix("\n") { updated += "\n" }
+        if !updated.isEmpty { updated += "\n" }
+        updated += managedRule
+        if !updated.hasSuffix("\n") { updated += "\n" }
+        return updated
+    }
 
     private enum SetupError: LocalizedError {
         case missingBundledSkill

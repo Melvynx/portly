@@ -2,7 +2,17 @@
 
 Portly is a native macOS supervisor for local development servers. It keeps each command in a real interactive PTY, checks its port, restarts it after crashes, and exposes the same controls through a menu bar app, a CLI, and a loopback-only HTTP API.
 
+Use persistent projects for long-lived, reusable services. Use top-level **Temporary** jobs for builds, tests, one-off previews, demos, generated artifacts, and short tasks; they run in the background with a deadline, expose their logs and exit code, and are never restored on the next launch.
+
 Portly requires macOS 14 or newer and Swift 6.
+
+## Smart resource dashboard
+
+The native **Resources** screen samples every Portly-owned process tree every two seconds and keeps a five-minute memory history. It shows physical footprint, resident RAM, CPU, project trends, and the current user's heaviest processes running outside Portly. Configure the optional global project limit and per-project inherit/off/custom overrides in **Settings → Memory**. A project restarts after three consecutive over-limit footprint samples, then sampling starts fresh on the replacement processes.
+
+Portly turns those measurements into machine-aware recommendations instead of relying on one fixed limit. It detects unusually large servers and processes, sustained growth while ignoring isolated build spikes, and duplicate dev sessions outside Portly. Advice is tailored to common Next.js, Vite, Node, TypeScript, browser, Docker, Redis, and Postgres failure modes. Managed servers can be restarted or stopped from the recommendation card. External process cards show the validated stop target, parent, working directory, listening ports, and the difference between footprint and resident RAM; an explicit confirmation can send SIGTERM, but Portly never terminates them automatically or escalates to SIGKILL.
+
+When Docker Desktop owns a published host port, Portly resolves the actual container through the Docker CLI. **Stop** and **Move to Portly** stop only that container instead of signaling the global `com.docker.backend` process.
 
 ## Install
 
@@ -39,10 +49,26 @@ The release script builds a universal Apple silicon and Intel binary from the pu
 
 ## CLI
 
-Every CLI command launches Portly automatically when it is closed. Prefer `--json` for scripts and agents.
+Every CLI command launches Portly automatically when it is closed. `status` is compact by default: it shows only active servers and problems. Use `--details` for the full human inventory and `--json` for complete machine-readable data.
 
 ```bash
+portly status
+portly status --details
 portly status --json
+
+portly memory-limit 5GB
+portly memory-limit 3GB --project lumail.io
+portly memory-limit inherit --project lumail.io
+portly memory-limit off
+
+job_id="$(portly temp 'npm run build' --timeout 20m)"
+portly wait "$job_id"
+
+portly temp 'npm run dev -- --host 127.0.0.1 --port 5180' \
+  --name transcript-preview \
+  --path /path/to/generated/transcript \
+  --port 5180 \
+  --timeout 1h
 
 portly add-project \
   --name codelynx \
@@ -65,11 +91,13 @@ portly take-over codelynx/web --json
 portly stop --project codelynx --json
 ```
 
-Other commands are `start`, `stop`, `restart`, `take-over` (`adopt`), `update-server`, `remove`, `port`, `kill-port`, `open`, `quit`, `forever`, and `config`. `take-over` stops an external listener on the configured port and relaunches the server under Portly. `forever` manages the per-user macOS LaunchAgent. Run `portly <command> --help` for exact flags. `quit` stops every managed server because the app is the supervisor.
+Other commands are `temp` (`temporary`, `run-temp`), `wait`, `memory-limit` (`ram-limit`), `start`, `stop`, `restart`, `take-over` (`adopt`), `update-server`, `remove`, `port`, `kill-port`, `open`, `quit`, `forever`, and `config`. `temp` returns a job ID immediately; `wait` blocks for that ID and exits with the job's real exit code (`124` for timeout). `memory-limit` shows or changes the global default and project overrides; it is off by default. `take-over` stops an external listener on the configured port and relaunches the server under Portly. `forever` manages the per-user macOS LaunchAgent. Run `portly <command> --help` for exact flags. `quit` stops every managed server because the app is the supervisor.
 
 ## Configuration
 
 Portly stores its source of truth in `~/.config/portly/config.json` and watches the file for external changes. Server logs live in `~/.config/portly/logs/`.
+
+Temporary jobs are intentionally absent from `config.json`. They exist only in the current Portly app session, appear separately as `temporaryServers` in `portly status --json`, and retain their terminal result for one hour so an agent can wait or inspect logs after a fast command completes.
 
 ```json
 {
@@ -116,8 +144,11 @@ The control API listens only on `127.0.0.1:7737`. It can start processes, so it 
 | `GET` | `/status` | Projects and live server state |
 | `GET` | `/config` | Current configuration |
 | `GET` | `/logs?server=web&tail=200` | Recent server output |
+| `GET` | `/temporary/status?id=tmp_1234` | Temporary job state, deadline and exit code |
 | `GET` | `/ports?port=5173` | Process occupying a port |
 | `POST` | `/start`, `/stop`, `/restart` | Act on a server or project |
+| `POST` | `/temporary/run` | Start a supervised background job outside any project |
+| `POST` | `/memory-limit` | Configure the global default or a project memory guard |
 | `POST` | `/projects/add`, `/projects/remove` | Mutate projects |
 | `POST` | `/servers/add`, `/servers/update`, `/servers/remove` | Mutate servers |
 | `POST` | `/servers/take-over` | Move an external listener under Portly |

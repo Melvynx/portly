@@ -17,12 +17,19 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
     @Published private(set) var lastExitCode: Int32?
     @Published private(set) var lastError: String?
     @Published private(set) var processMetrics: ProcessMetrics?
+    @Published private(set) var temporaryTimeoutSeconds: Int?
+    @Published private(set) var temporaryDeadline: Date?
+    @Published private(set) var temporaryFinishedAt: Date?
+    @Published private(set) var temporaryTimedOut = false
 
     let id: String
     private(set) var config: ServerConfig
     private(set) var projectID: String
     private(set) var projectName: String
     private(set) var projectRoot: String
+    /// Carried on the runtime because temporary projects never reach `config.json`,
+    /// so looking their color up in the project list always fails.
+    private(set) var projectColorHex: String
 
     private var settings: PortlyConfig
     private let logs: LogStore
@@ -38,6 +45,9 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
     private var takeoverPending = false
     private var consecutiveHealthFailures = 0
     private var lastHealthyAt: Date?
+    private var temporaryStartedAt: Date?
+    private var temporaryStoppedByUser = false
+    private var timeoutWork: DispatchWorkItem?
 
     /// Called when a server lands in `.failed`, for the macOS notification.
     var onFailed: ((ServerRuntime) -> Void)?
@@ -50,6 +60,7 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
         self.projectID = project.id
         self.projectName = project.name
         self.projectRoot = project.root
+        self.projectColorHex = project.color
         self.settings = settings
         self.logs = LogStore(
             serverID: config.id,
@@ -90,7 +101,7 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
             directory: workingDirectory,
             state: state,
             pid: pid,
-            startedAt: startedAt,
+            startedAt: startedAt ?? temporaryStartedAt,
             restartCount: restartCount,
             lastExitCode: lastExitCode,
             lastError: lastError,
@@ -99,8 +110,51 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
             cpuPercent: processMetrics?.cpuPercent,
             memoryBytes: processMetrics?.memoryBytes,
             residentMemoryBytes: processMetrics?.residentMemoryBytes,
-            processCount: processMetrics?.processCount
+            processCount: processMetrics?.processCount,
+            temporary: isTemporaryJob ? true : nil,
+            timeoutSeconds: temporaryTimeoutSeconds,
+            deadline: temporaryDeadline,
+            finishedAt: temporaryFinishedAt,
+            timedOut: isTemporaryJob ? temporaryTimedOut : nil
         )
+    }
+
+    var isTemporaryJob: Bool { temporaryTimeoutSeconds != nil }
+
+    var temporaryJobStatus: TemporaryJobStatus? {
+        guard let timeoutSeconds = temporaryTimeoutSeconds else { return nil }
+        let jobState: TemporaryJobState
+        if temporaryTimedOut {
+            jobState = .timedOut
+        } else if isRunning {
+            jobState = .running
+        } else if state == .failed || (lastExitCode.map { $0 != 0 } ?? false) {
+            jobState = .failed
+        } else if temporaryStoppedByUser {
+            jobState = .stopped
+        } else if lastExitCode == 0 {
+            jobState = .succeeded
+        } else {
+            jobState = .stopped
+        }
+        return TemporaryJobStatus(
+            id: id,
+            name: config.name,
+            command: config.command,
+            directory: workingDirectory,
+            state: jobState,
+            pid: pid,
+            startedAt: temporaryStartedAt,
+            finishedAt: temporaryFinishedAt,
+            timeoutSeconds: timeoutSeconds,
+            deadline: temporaryDeadline,
+            exitCode: lastExitCode,
+            error: lastError
+        )
+    }
+
+    func configureTemporaryJob(timeoutSeconds: Int) {
+        temporaryTimeoutSeconds = timeoutSeconds
     }
 
     func updateProcessMetrics(_ metrics: ProcessMetrics?) {
@@ -176,6 +230,7 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
         self.projectID = project.id
         self.projectName = project.name
         self.projectRoot = project.root
+        self.projectColorHex = project.color
         self.settings = settings
         logs.updateLimits(maxLines: settings.logBufferLines, maxMB: settings.logFileMaxMB)
         if healthIntervalChanged, isRunning { startHealthTimer() }
@@ -192,6 +247,16 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
         restartCount = 0
         lastHealthyAt = nil
         consecutiveHealthFailures = 0
+        if isTemporaryJob {
+            timeoutWork?.cancel()
+            timeoutWork = nil
+            temporaryStartedAt = nil
+            temporaryDeadline = nil
+            temporaryFinishedAt = nil
+            temporaryTimedOut = false
+            temporaryStoppedByUser = false
+            lastExitCode = nil
+        }
         spawn()
     }
 
@@ -206,9 +271,24 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
         }
     }
 
+    func restartForMemoryLimit(projectFootprintBytes: UInt64, limitBytes: UInt64) {
+        let usage = MemorySize.display(projectFootprintBytes)
+        let limit = MemorySize.display(limitBytes)
+        let message = "memory guard: project footprint \(usage) exceeded \(limit); restarting"
+        logs.note(message)
+        terminal?.feed(text: "\r\n\u{1B}[33m[portly] \(message)\u{1B}[0m\r\n")
+        restart()
+    }
+
     func stop(then completion: (() -> Void)? = nil) {
+        if isTemporaryJob, !temporaryTimedOut {
+            temporaryStoppedByUser = true
+        }
         guard let process, process.running, process.shellPid > 0 else {
             takeoverPending = false
+            if isTemporaryJob, temporaryFinishedAt == nil { temporaryFinishedAt = Date() }
+            timeoutWork?.cancel()
+            timeoutWork = nil
             setState(.stopped)
             completion?()
             return
@@ -277,7 +357,12 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
                 currentDirectory: dir
             )
             self.pid = proc.shellPid
-            self.startedAt = Date()
+            let launchedAt = Date()
+            self.startedAt = launchedAt
+            if self.isTemporaryJob {
+                self.temporaryStartedAt = launchedAt
+                self.scheduleTemporaryTimeout()
+            }
             self.startHealthTimer()
             self.onStateChange?()
         }
@@ -305,6 +390,23 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
         return env.map { "\($0.key)=\($0.value)" }
     }
 
+    private func scheduleTemporaryTimeout() {
+        guard let seconds = temporaryTimeoutSeconds else { return }
+        timeoutWork?.cancel()
+        let deadline = Date().addingTimeInterval(TimeInterval(seconds))
+        temporaryDeadline = deadline
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.isRunning else { return }
+            self.temporaryTimedOut = true
+            self.lastError = "Timed out after \(TemporaryTimeout.display(seconds))"
+            self.logs.note(self.lastError!)
+            self.terminal?.feed(text: "\r\n\u{1B}[31m[portly] \(self.lastError!)\u{1B}[0m\r\n")
+            self.stop()
+        }
+        timeoutWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + TimeInterval(seconds), execute: work)
+    }
+
     /// Stop a listener launched outside Portly, then start this configured
     /// server as soon as the port is released. The explicit UI/CLI action is
     /// the authority boundary; Portly never takes over automatically.
@@ -313,17 +415,32 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
         guard !isRunning, let port = config.port, let occupant = PortInspector.occupant(of: port) else {
             return false
         }
-        logs.note("taking over port \(port) from \(occupant.command) (pid \(occupant.pid))")
-        guard PortInspector.kill(pid: occupant.pid) else {
-            lastError = "Unable to stop \(occupant.command) (pid \(occupant.pid))"
-            setState(.failed)
-            return false
-        }
+        logs.note("preparing to take over port \(port) from \(occupant.command) (pid \(occupant.pid))")
         takeoverPending = true
-        lastError = "Waiting for port \(port) to be released"
+        lastError = "Stopping the current owner of port \(port)"
         setState(.starting)
-        terminal?.feed(text: "\u{1B}[33m[portly] moving port \(port) from \(occupant.command)…\u{1B}[0m\r\n")
-        waitForPortRelease(port: port, attemptsRemaining: 25)
+        terminal?.feed(text: "\u{1B}[33m[portly] identifying the owner of port \(port)…\u{1B}[0m\r\n")
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = PortInspector.stopOccupant(of: port, expectedPID: occupant.pid)
+            DispatchQueue.main.async {
+                guard let self, self.takeoverPending else { return }
+                switch result {
+                case .success(let outcome):
+                    self.logs.note("stopped \(outcome.description); waiting for port \(port)")
+                    self.terminal?.feed(
+                        text: "\u{1B}[33m[portly] stopped \(outcome.description); starting the configured server…\u{1B}[0m\r\n"
+                    )
+                    self.lastError = "Waiting for port \(port) to be released"
+                    self.waitForPortRelease(port: port, attemptsRemaining: 50)
+                case .failure(let error):
+                    self.takeoverPending = false
+                    self.lastError = error.localizedDescription
+                    self.logs.note("takeover failed: \(error.localizedDescription)")
+                    self.setState(.failed)
+                }
+            }
+        }
         return true
     }
 
@@ -460,11 +577,25 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
             pid = nil
             processMetrics = nil
             if new == .stopped { startedAt = nil }
+            if isTemporaryJob, new == .failed, temporaryFinishedAt == nil {
+                temporaryFinishedAt = Date()
+            }
         }
         onStateChange?()
     }
 
     // MARK: - LocalProcessDelegate
+
+    /// SwiftTerm reports the raw `waitpid` status. Convert normal exits from
+    /// `code << 8` and signals to the shell convention `128 + signal` before
+    /// exposing them through the API or using them as the CLI exit status.
+    static func normalizedProcessExitCode(_ rawStatus: Int32?) -> Int32? {
+        guard let rawStatus else { return nil }
+        let signal = rawStatus & 0x7F
+        if signal == 0 { return (rawStatus >> 8) & 0xFF }
+        if signal != 0x7F { return 128 + signal }
+        return rawStatus
+    }
 
     func processTerminated(_ source: LocalProcess, exitCode: Int32?) {
         DispatchQueue.main.async { [weak self] in
@@ -472,22 +603,34 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
             self.killWork?.cancel()
             self.killWork = nil
             self.stopHealthTimer()
-            self.lastExitCode = exitCode
+            self.timeoutWork?.cancel()
+            self.timeoutWork = nil
+            let normalizedExitCode = Self.normalizedProcessExitCode(exitCode)
+            self.lastExitCode = normalizedExitCode
             self.pid = nil
             self.healthy = false
             self.processMetrics = nil
             self.process = nil
+            if self.isTemporaryJob { self.temporaryFinishedAt = Date() }
 
-            let code = exitCode.map(String.init) ?? "signal"
+            let code = normalizedExitCode.map(String.init) ?? "signal"
             self.logs.note("process exited (\(code))")
             self.terminal?.feed(text: "\r\n\u{1B}[2m[portly] exited (\(code))\u{1B}[0m\r\n")
 
             if self.manualStop {
                 self.manualStop = false
-                self.setState(.stopped)
+                self.setState(self.temporaryTimedOut ? .failed : .stopped)
                 let completion = self.pendingStopCompletion
                 self.pendingStopCompletion = nil
                 completion?()
+            } else if self.isTemporaryJob {
+                if normalizedExitCode == 0 {
+                    self.setState(.stopped)
+                } else {
+                    self.lastError = "Exited with code \(code)"
+                    self.setState(.failed)
+                    self.onFailed?(self)
+                }
             } else {
                 self.handleCrashRestart(reason: "exit \(code)")
             }

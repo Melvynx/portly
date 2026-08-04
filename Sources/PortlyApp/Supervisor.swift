@@ -29,6 +29,9 @@ final class Supervisor: ObservableObject {
     @Published private(set) var projects: [Project] = []
     @Published private(set) var resourceHistory: [ResourceHistoryPoint] = []
     @Published private(set) var projectResourceHistory: [ProjectResourceHistoryPoint] = []
+    @Published private(set) var externalProcesses: [ExternalProcessSnapshot] = []
+    @Published private(set) var temporaryRuntimeIDs: [String] = []
+    @Published private(set) var memoryLimitRestarts: [String: MemoryLimitRestartEvent] = [:]
     /// Bumped on any runtime state change so SwiftUI redraws the lists.
     @Published private(set) var revision: Int = 0
 
@@ -37,6 +40,8 @@ final class Supervisor: ObservableObject {
     private let metricsQueue = DispatchQueue(label: "dev.melvynx.portly.process-metrics", qos: .utility)
     private var metricsTimer: Timer?
     private var metricsSampleInFlight = false
+    private var metricsSampleSequence = 0
+    private var memoryLimitGuard = MemoryLimitGuard()
 
     private struct UpdaterRelaunchState: Codable {
         let serverIDs: [String]
@@ -79,15 +84,22 @@ final class Supervisor: ObservableObject {
             }
         }
         // A server removed from the config must not keep running.
-        for (id, runtime) in runtimes where !seen.contains(id) {
+        let temporaryIDs = Set(temporaryRuntimeIDs)
+        for (id, runtime) in runtimes where !seen.contains(id) && !temporaryIDs.contains(id) {
             runtime.stop()
             runtimes.removeValue(forKey: id)
         }
     }
 
-    private func wire(_ runtime: ServerRuntime) {
-        runtime.onStateChange = { [weak self] in
-            DispatchQueue.main.async { self?.bump() }
+    private func wire(_ runtime: ServerRuntime, temporary: Bool = false) {
+        runtime.onStateChange = { [weak self, weak runtime] in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.bump()
+                if temporary, runtime?.isRunning == false {
+                    self.scheduleTemporaryCleanup(runtimeID: runtime?.id)
+                }
+            }
         }
         runtime.onFailed = { runtime in
             Notifications.serverFailed(name: runtime.config.name, project: runtime.projectName, reason: runtime.lastError)
@@ -96,6 +108,22 @@ final class Supervisor: ObservableObject {
 
     private func bump() {
         revision &+= 1
+    }
+
+    private func scheduleTemporaryCleanup(runtimeID: String?) {
+        guard let runtimeID, let completedAt = runtimes[runtimeID]?.temporaryFinishedAt else { return }
+        // Keep completed jobs long enough for a detached agent to call
+        // `portly wait <id>` and inspect logs/result after a fast command exits.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3_600) { [weak self] in
+            guard let self,
+                  self.temporaryRuntimeIDs.contains(runtimeID),
+                  let runtime = self.runtimes[runtimeID],
+                  runtime.isRunning == false,
+                  runtime.temporaryFinishedAt == completedAt else { return }
+            self.runtimes.removeValue(forKey: runtimeID)
+            self.temporaryRuntimeIDs.removeAll { $0 == runtimeID }
+            self.bump()
+        }
     }
 
     private func startMetricsTimer() {
@@ -116,20 +144,36 @@ final class Supervisor: ObservableObject {
         for runtime in runtimes.values where !runtime.isRunning {
             runtime.updateProcessMetrics(nil)
         }
-        guard !targets.isEmpty else { return }
 
         metricsSampleInFlight = true
+        metricsSampleSequence &+= 1
+        // `ps` remains live every two seconds. More expensive cwd/listener
+        // enrichment runs every ten seconds and is retained between samples.
+        let includeExternalDetails = externalProcesses.isEmpty || metricsSampleSequence.isMultiple(of: 5)
         let rootProcessIDs = Set(targets.values)
         metricsQueue.async { [weak self] in
-            let samples = ProcessMetricsSampler.sample(rootProcessIDs: rootProcessIDs)
+            let sample = ProcessMetricsSampler.sample(
+                rootProcessIDs: rootProcessIDs,
+                includeExternalDetails: includeExternalDetails
+            )
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.metricsSampleInFlight = false
                 for (serverID, sampledPID) in targets {
                     guard let runtime = self.runtimes[serverID], runtime.pid == sampledPID else { continue }
-                    runtime.updateProcessMetrics(samples[sampledPID])
+                    runtime.updateProcessMetrics(sample.managedByRoot[sampledPID])
                 }
-                self.recordResourceHistory(samples: samples, targets: targets)
+                if includeExternalDetails {
+                    self.externalProcesses = sample.externalProcesses
+                } else {
+                    let previousByPID = Dictionary(uniqueKeysWithValues: self.externalProcesses.map { ($0.pid, $0) })
+                    self.externalProcesses = sample.externalProcesses.map {
+                        $0.preservingDetails(from: previousByPID[$0.pid])
+                    }
+                }
+                self.recordResourceHistory(samples: sample.managedByRoot, targets: targets)
+                self.evaluateMemoryLimits(samples: sample.managedByRoot, targets: targets)
+                self.bump()
             }
         }
     }
@@ -163,7 +207,8 @@ final class Supervisor: ObservableObject {
         var projectTotals: [String: ProjectTotals] = [:]
         for (serverID, rootPID) in targets {
             guard let runtime = runtimes[serverID], let metrics = samples[rootPID] else { continue }
-            let colorHex = projects.first(where: { $0.id == runtime.projectID })?.color ?? "#FF9F0A"
+            let colorHex = projects.first(where: { $0.id == runtime.projectID })?.color
+                ?? runtime.projectColorHex
             var total = projectTotals[runtime.projectID]
                 ?? ProjectTotals(name: runtime.projectName, colorHex: colorHex)
             total.footprintBytes += metrics.memoryBytes
@@ -185,7 +230,52 @@ final class Supervisor: ObservableObject {
         projectResourceHistory.removeAll { $0.timestamp < cutoff }
     }
 
+    private func evaluateMemoryLimits(
+        samples: [Int32: ProcessMetrics],
+        targets: [String: Int32],
+        now: Date = Date()
+    ) {
+        let projectIDs = Set(projects.map(\.id))
+        memoryLimitGuard.removeProjects(except: projectIDs)
+        memoryLimitRestarts = memoryLimitRestarts.filter { projectIDs.contains($0.key) }
+
+        for project in projects {
+            let running = runtimes(inProject: project.id).filter(\.isRunning)
+            let footprint = running.reduce(UInt64(0)) { total, runtime in
+                guard let rootPID = targets[runtime.id], let metrics = samples[rootPID] else { return total }
+                return total + metrics.memoryBytes
+            }
+            let limit = project.effectiveMemoryLimit(global: store.config.globalMemoryLimitBytes)
+            guard memoryLimitGuard.shouldRestart(
+                projectID: project.id,
+                footprintBytes: footprint,
+                limitBytes: limit,
+                hasRunningServers: !running.isEmpty
+            ), let limit else { continue }
+
+            let serverIDs = running.map(\.id)
+            memoryLimitRestarts[project.id] = MemoryLimitRestartEvent(
+                projectID: project.id,
+                timestamp: now,
+                footprintBytes: footprint,
+                limitBytes: limit,
+                restartedServerIDs: serverIDs
+            )
+            for runtime in running {
+                runtime.restartForMemoryLimit(projectFootprintBytes: footprint, limitBytes: limit)
+            }
+        }
+    }
+
     func runtime(for id: String) -> ServerRuntime? { runtimes[id] }
+
+    var temporaryRuntimes: [ServerRuntime] {
+        temporaryRuntimeIDs.compactMap { runtimes[$0] }
+    }
+
+    var visibleTemporaryRuntimes: [ServerRuntime] {
+        temporaryRuntimes.filter(\.isRunning)
+    }
 
     func runtimes(inProject id: String) -> [ServerRuntime] {
         guard let project = store.config.project(id: id) else { return [] }
@@ -198,16 +288,24 @@ final class Supervisor: ObservableObject {
         PortlyStatus(
             version: portlyVersion,
             apiPort: store.config.apiPort,
+            globalMemoryLimitBytes: store.config.globalMemoryLimitBytes,
             projects: store.config.projects.map { project in
-                ProjectStatus(
+                let memoryRestart = memoryLimitRestarts[project.id]
+                return ProjectStatus(
                     id: project.id,
                     name: project.name,
                     icon: project.icon,
                     color: project.color,
                     root: project.root,
-                    servers: project.servers.compactMap { runtimes[$0.id]?.status }
+                    servers: project.servers.compactMap { runtimes[$0.id]?.status },
+                    memoryLimitMode: project.memoryLimitMode,
+                    memoryLimitBytes: project.memoryLimitBytes,
+                    effectiveMemoryLimitBytes: project.effectiveMemoryLimit(global: store.config.globalMemoryLimitBytes),
+                    lastMemoryRestartAt: memoryRestart?.timestamp,
+                    lastMemoryRestartBytes: memoryRestart?.footprintBytes
                 )
-            }
+            },
+            temporaryServers: temporaryRuntimes.map(\.status)
         )
     }
 
@@ -244,7 +342,7 @@ final class Supervisor: ObservableObject {
     func prepareForUpdaterRelaunch() {
         let relaunchState = UpdaterRelaunchStateStore(url: updaterRelaunchStateURL)
         let ids = runtimes.values
-            .filter(\.isRunning)
+            .filter { $0.isRunning && !temporaryRuntimeIDs.contains($0.id) }
             .map(\.id)
             .sorted()
 
@@ -316,12 +414,21 @@ final class Supervisor: ObservableObject {
 
     // MARK: - Config mutations
 
-    func addProject(name: String, root: String, icon: String?, color: String?) -> Project {
+    func addProject(
+        name: String,
+        root: String,
+        icon: String?,
+        color: String?,
+        memoryLimitMode: MemoryLimitMode = .inherit,
+        memoryLimitBytes: UInt64? = nil
+    ) -> Project {
         let project = Project(
             name: name,
             icon: icon ?? Project.defaultIcon,
-            color: color ?? Supervisor.nextColor(index: store.config.projects.count),
-            root: NSString(string: root).expandingTildeInPath
+            color: color ?? Supervisor.nextColor(excluding: store.config.projects.map(\.color)),
+            root: NSString(string: root).expandingTildeInPath,
+            memoryLimitMode: memoryLimitMode,
+            memoryLimitBytes: memoryLimitBytes
         )
         store.mutate { $0.projects.append(project) }
         refresh()
@@ -329,9 +436,30 @@ final class Supervisor: ObservableObject {
     }
 
     func updateProject(_ project: Project) {
+        if let previous = store.config.project(id: project.id),
+           previous.memoryLimitMode != project.memoryLimitMode
+            || previous.memoryLimitBytes != project.memoryLimitBytes {
+            memoryLimitGuard.reset(projectID: project.id)
+        }
         store.mutate { config in
             guard let idx = config.projects.firstIndex(where: { $0.id == project.id }) else { return }
             config.projects[idx] = project
+        }
+        refresh()
+    }
+
+    func updateGlobalMemoryLimit(_ bytes: UInt64?) {
+        memoryLimitGuard.resetAll()
+        store.mutate { $0.globalMemoryLimitBytes = bytes }
+        refresh()
+    }
+
+    func updateProjectMemoryLimit(projectID: String, mode: MemoryLimitMode, bytes: UInt64?) {
+        memoryLimitGuard.reset(projectID: projectID)
+        store.mutate { config in
+            guard let index = config.projects.firstIndex(where: { $0.id == projectID }) else { return }
+            config.projects[index].memoryLimitMode = mode
+            config.projects[index].memoryLimitBytes = mode == .custom ? bytes : nil
         }
         refresh()
     }
@@ -356,6 +484,58 @@ final class Supervisor: ObservableObject {
         return added
     }
 
+    @discardableResult
+    func runTemporary(
+        name: String,
+        command: String,
+        directory: String,
+        port: Int?,
+        env: [String: String] = [:],
+        healthURL: String? = nil,
+        healthStatus: Int? = nil,
+        timeoutSeconds: Int = TemporaryTimeout.defaultSeconds
+    ) -> ServerRuntime {
+        let resolvedDirectory = NSString(string: directory).expandingTildeInPath
+        let resolvedName = uniqueTemporaryName(name)
+        let server = ServerConfig(
+            id: "tmp_" + String(UUID().uuidString.prefix(8)).lowercased(),
+            name: resolvedName,
+            command: command,
+            port: port,
+            env: env,
+            healthURL: healthURL,
+            healthStatus: healthStatus,
+            autoRestart: false
+        )
+        let temporaryProject = Project(
+            id: Supervisor.temporaryProjectID,
+            name: "Temporary",
+            icon: "clock.badge",
+            color: Supervisor.temporaryProjectColor,
+            root: resolvedDirectory,
+            servers: [server]
+        )
+        let runtime = ServerRuntime(config: server, project: temporaryProject, settings: store.config)
+        runtime.configureTemporaryJob(timeoutSeconds: timeoutSeconds)
+        wire(runtime, temporary: true)
+        runtimes[server.id] = runtime
+        temporaryRuntimeIDs.append(server.id)
+        bump()
+        runtime.start()
+        return runtime
+    }
+
+    private func uniqueTemporaryName(_ requestedName: String) -> String {
+        let base = requestedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Temporary process"
+            : requestedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let existing = Set(temporaryRuntimes.map { $0.config.name.lowercased() })
+        guard existing.contains(base.lowercased()) else { return base }
+        var suffix = 2
+        while existing.contains("\(base) \(suffix)".lowercased()) { suffix += 1 }
+        return "\(base) \(suffix)"
+    }
+
     func updateServer(_ server: ServerConfig) {
         store.mutate { config in
             for (pIdx, project) in config.projects.enumerated() {
@@ -369,6 +549,17 @@ final class Supervisor: ObservableObject {
     }
 
     func removeServer(id: String) {
+        if temporaryRuntimeIDs.contains(id) {
+            guard let runtime = runtime(for: id) else { return }
+            if runtime.isRunning {
+                runtime.stop { [weak self] in
+                    self?.removeTemporaryRuntime(id: id)
+                }
+            } else {
+                removeTemporaryRuntime(id: id)
+            }
+            return
+        }
         runtime(for: id)?.stop()
         store.mutate { config in
             for (pIdx, project) in config.projects.enumerated() {
@@ -379,6 +570,12 @@ final class Supervisor: ObservableObject {
             }
         }
         refresh()
+    }
+
+    private func removeTemporaryRuntime(id: String) {
+        runtimes.removeValue(forKey: id)
+        temporaryRuntimeIDs.removeAll { $0 == id }
+        bump()
     }
 
     func refresh() {
@@ -405,8 +602,12 @@ final class Supervisor: ObservableObject {
     // MARK: - Resolution helpers (shared by the API and the UI)
 
     func resolveServer(_ query: String) -> ServerRuntime? {
-        guard let hit = store.config.resolveServer(query) else { return nil }
-        return runtimes[hit.server.id]
+        if let hit = store.config.resolveServer(query) { return runtimes[hit.server.id] }
+        if let runtime = temporaryRuntimes.first(where: { $0.id == query }) { return runtime }
+        let normalized = query.split(separator: "/", maxSplits: 1).last.map(String.init) ?? query
+        return temporaryRuntimes.first {
+            $0.config.name.caseInsensitiveCompare(normalized) == .orderedSame
+        }
     }
 
     func resolveProject(_ query: String) -> Project? {
@@ -422,6 +623,21 @@ final class Supervisor: ObservableObject {
             if let server = project.servers.first(where: { $0.port == port && $0.id != serverID }) {
                 return (project, server)
             }
+        }
+        if let runtime = temporaryRuntimes.first(where: {
+            $0.id != serverID && $0.config.port == port
+        }) {
+            return (
+                Project(
+                    id: Supervisor.temporaryProjectID,
+                    name: "Temporary",
+                    icon: "clock.badge",
+                    color: Supervisor.temporaryProjectColor,
+                    root: runtime.workingDirectory,
+                    servers: [runtime.config]
+                ),
+                runtime.config
+            )
         }
         return nil
     }
@@ -440,21 +656,60 @@ final class Supervisor: ObservableObject {
     func occupant(of port: Int) -> PortOccupant? {
         guard let found = PortInspector.occupant(of: port) else { return nil }
         let owned = runtimes.values.first { $0.status.pid == found.pid || ($0.config.port == port && $0.isRunning) }
+        let container = DockerPortInspector.container(publishing: port)
         return PortOccupant(
             port: port,
             pid: found.pid,
             command: found.command,
             user: found.user,
             ownedByPortly: owned != nil,
-            serverID: owned?.id
+            serverID: owned?.id,
+            dockerContainerID: container?.id,
+            dockerContainerName: container?.name,
+            dockerComposeProject: container?.composeProject,
+            dockerComposeService: container?.composeService
         )
     }
 
     /// The palette is intentionally the macOS system colors, so projects read as
-    /// native rather than branded.
-    static let palette = ["#0A84FF", "#30D158", "#FF9F0A", "#FF375F", "#BF5AF2", "#64D2FF", "#FFD60A", "#8E8E93"]
+    /// native rather than branded. The order matters: colors are handed out in this
+    /// sequence, and every adjacent pair sits at least 86 degrees apart in OKLCH hue,
+    /// so the first projects you create never look alike in the charts.
+    static let palette = [
+        "#0A84FF", // Blue
+        "#FF9F0A", // Orange
+        "#BF5AF2", // Purple
+        "#30D158", // Green
+        "#FF375F", // Pink
+        "#64D2FF", // Cyan
+        "#FFD60A", // Yellow
+        "#5E5CE6", // Indigo
+        "#66D4CF", // Mint
+        "#8E8E93", // Gray
+    ]
+    static let paletteNames = [
+        "Blue", "Orange", "Purple", "Green", "Pink", "Cyan", "Yellow", "Indigo", "Mint", "Gray",
+    ]
+    static let temporaryProjectID = "portly-temporary"
+    static let temporaryProjectColor = "#8E8E93"
 
-    static func nextColor(index: Int) -> String {
-        palette[index % palette.count]
+    /// Hands out the first palette color no project uses yet, so two projects never
+    /// end up with the same line in the resource charts. Once every color is taken,
+    /// the least used one wins.
+    static func nextColor(excluding used: [String]) -> String {
+        var counts: [String: Int] = [:]
+        for hex in used {
+            counts[hex.uppercased(), default: 0] += 1
+        }
+        var best = palette[0]
+        var bestCount = Int.max
+        for hex in palette {
+            let count = counts[hex.uppercased()] ?? 0
+            guard count < bestCount else { continue }
+            best = hex
+            bestCount = count
+            if count == 0 { break }
+        }
+        return best
     }
 }

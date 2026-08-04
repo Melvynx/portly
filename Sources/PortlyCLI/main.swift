@@ -33,6 +33,8 @@ func fail(_ message: String) -> Never {
 
 extension ServerStatus {
     var stateGlyph: String {
+        if timedOut == true { return "✕" }
+        if temporary == true, finishedAt != nil, lastExitCode == 0 { return "✓" }
         switch state {
         case .running: return "●"
         case .starting, .restarting: return "◐"
@@ -42,31 +44,126 @@ extension ServerStatus {
         }
     }
 
-    var line: String {
+    var detailedLine: String {
         let port = self.port.map { ":\($0)" } ?? ""
-        let uptime = startedAt.map { " up \(Int(Date().timeIntervalSince($0)))s" } ?? ""
+        let duration = startedAt.map { started in
+            let end = finishedAt ?? Date()
+            return " \(finishedAt == nil ? "up" : "duration") \(Int(end.timeIntervalSince(started)))s"
+        } ?? ""
         let restarts = restartCount > 0 ? " restarts:\(restartCount)" : ""
         let cpu = cpuPercent.map { " cpu:\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? ""
         let memory = memoryBytes.map { " footprint:\(ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .memory))" } ?? ""
         let resident = residentMemoryBytes.map { " resident:\(ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .memory))" } ?? ""
         let processes = processCount.map { " processes:\($0)" } ?? ""
-        return "  \(stateGlyph) \(name)\(port)  \(state.rawValue)\(uptime)\(cpu)\(memory)\(resident)\(processes)\(restarts)"
+        let outcome: String
+        if timedOut == true {
+            outcome = "timed-out"
+        } else if temporary == true, finishedAt != nil, lastExitCode == 0 {
+            outcome = "succeeded"
+        } else {
+            outcome = state.rawValue
+        }
+        let timeout = timeoutSeconds.map { " timeout:\(TemporaryTimeout.display($0))" } ?? ""
+        let exitCode = lastExitCode.map { " exit:\($0)" } ?? ""
+        return "  \(stateGlyph) \(name)\(port)  \(outcome)\(duration)\(timeout)\(exitCode)\(cpu)\(memory)\(resident)\(processes)\(restarts)"
     }
 }
 
-func render(_ status: PortlyStatus) -> String {
-    guard !status.projects.isEmpty else {
-        return "No projects yet. Add one with: portly add-project --name <name> --path <folder>"
+private struct NamedServerStatus {
+    let name: String
+    let status: ServerStatus
+}
+
+private func namedServers(in status: PortlyStatus) -> [NamedServerStatus] {
+    let projectServers = status.projects.flatMap { project in
+        project.servers.map { NamedServerStatus(name: "\(project.name)/\($0.name)", status: $0) }
+    }
+    let temporaryServers = status.temporaryServers.map {
+        NamedServerStatus(name: "Temporary/\($0.name)", status: $0)
+    }
+    return projectServers + temporaryServers
+}
+
+private func compactLine(_ item: NamedServerStatus, nameWidth: Int) -> String {
+    let server = item.status
+    let name = item.name.padding(toLength: nameWidth, withPad: " ", startingAt: 0)
+    let port = server.port.map { ":\($0)" } ?? "no port"
+
+    switch server.state {
+    case .running:
+        return "\(server.stateGlyph) \(name)  \(port)"
+    case .starting, .restarting:
+        return "\(server.stateGlyph) \(name)  \(port)  \(server.state.rawValue)"
+    case .unhealthy, .failed:
+        let error = server.lastError.map { message -> String in
+            let normalized = message.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            let concise = normalized.count > 100 ? String(normalized.prefix(97)) + "…" : normalized
+            return concise.isEmpty ? "" : " — \(concise)"
+        } ?? ""
+        return "\(server.stateGlyph) \(name)  \(port)  \(server.state.rawValue)\(error)"
+    case .stopped:
+        return "\(server.stateGlyph) \(name)  \(port)  stopped"
+    }
+}
+
+func renderCompact(_ status: PortlyStatus) -> String {
+    let servers = namedServers(in: status)
+    guard !servers.isEmpty else {
+        return "No servers configured. Use 'portly temp' for one-off work, or add a project for long-lived services."
+    }
+
+    let runningCount = servers.filter { $0.status.state == .running }.count
+    let transitioningCount = servers.filter { [.starting, .restarting].contains($0.status.state) }.count
+    let problemCount = servers.filter { [.unhealthy, .failed].contains($0.status.state) }.count
+    let completedCount = servers.filter {
+        $0.status.temporary == true && $0.status.finishedAt != nil && $0.status.lastExitCode == 0
+    }.count
+    let stoppedCount = servers.filter {
+        $0.status.state == .stopped && !($0.status.temporary == true && $0.status.finishedAt != nil)
+    }.count
+    let visible = servers.filter { $0.status.state != .stopped }
+
+    var summary = ["\(runningCount) running"]
+    if transitioningCount > 0 {
+        summary.append("\(transitioningCount) starting")
+    }
+    summary.append("\(problemCount) problem\(problemCount == 1 ? "" : "s")")
+    if completedCount > 0 {
+        summary.append("\(completedCount) completed")
+    }
+    summary.append("\(stoppedCount) stopped")
+
+    guard !visible.isEmpty else {
+        return summary.joined(separator: " · ") + "\n\nNo active servers."
+    }
+
+    let nameWidth = visible.map(\.name.count).max() ?? 0
+    let lines = visible.map { compactLine($0, nameWidth: nameWidth) }
+    return [summary.joined(separator: " · "), "", lines.joined(separator: "\n")].joined(separator: "\n")
+}
+
+func renderDetailed(_ status: PortlyStatus) -> String {
+    guard !status.projects.isEmpty || !status.temporaryServers.isEmpty else {
+        return "Nothing running yet. Use 'portly temp' for small one-off work, or add a project for long-lived services."
     }
     var out: [String] = []
     for project in status.projects {
-        out.append("\(project.name)  (\(project.id))")
+        let limit = project.effectiveMemoryLimitBytes.map { MemorySize.display($0) } ?? "off"
+        let source = project.memoryLimitMode == .inherit ? "global" : project.memoryLimitMode.rawValue
+        out.append("\(project.name)  (\(project.id))  memory-limit:\(limit) [\(source)]")
+        if let restartedAt = project.lastMemoryRestartAt, let usage = project.lastMemoryRestartBytes {
+            out.append("  ↻ memory guard restarted at \(restartedAt.formatted()) using \(MemorySize.display(usage))")
+        }
         if project.servers.isEmpty {
             out.append("  no servers")
         } else {
-            out.append(contentsOf: project.servers.map(\.line))
+            out.append(contentsOf: project.servers.map(\.detailedLine))
         }
         out.append("")
+    }
+    if !status.temporaryServers.isEmpty {
+        out.append("Temporary")
+        out.append(contentsOf: status.temporaryServers.map(\.detailedLine))
     }
     return out.joined(separator: "\n").trimmingCharacters(in: .newlines)
 }
@@ -86,8 +183,8 @@ struct Portly: ParsableCommand {
         version: portlyVersion,
         subcommands: [
             Status.self, Start.self, Stop.self, Restart.self, Logs.self,
-            AddProject.self, AddServer.self, UpdateServer.self,
-            Remove.self, TakeOver.self, Port.self, KillPort.self, Open.self, Quit.self, Forever.self, Config.self,
+            Temp.self, Wait.self, AddProject.self, AddServer.self, UpdateServer.self,
+            MemoryLimit.self, Remove.self, TakeOver.self, Port.self, KillPort.self, Open.self, Quit.self, Forever.self, Config.self,
         ],
         defaultSubcommand: Status.self
     )
@@ -98,16 +195,20 @@ struct Portly: ParsableCommand {
 struct Status: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "status",
-        abstract: "List every project and server with its live state.",
+        abstract: "Show active servers and problems compactly.",
+        discussion: "Use --details for every configured server, IDs, uptime, and resource metrics. --json always returns the complete machine-readable status.",
         aliases: ["list", "ls"]
     )
 
     @OptionGroup var options: GlobalOptions
 
+    @Flag(name: .long, help: "Show every configured server, IDs, uptime, and resource metrics.")
+    var details = false
+
     func run() throws {
         do {
             let status = try client(options).get("status", as: PortlyStatus.self)
-            emit(status, json: options.json, human: render)
+            emit(status, json: options.json) { details ? renderDetailed($0) : renderCompact($0) }
         } catch {
             fail(error.localizedDescription)
         }
@@ -202,6 +303,139 @@ struct Logs: ParsableCommand {
 
 // MARK: - Config mutations
 
+struct Temp: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "temp",
+        abstract: "Run a short-lived process without creating a project.",
+        discussion: "The command starts in the background, returns a job ID immediately, and is stopped with its entire process group at the timeout. Use 'portly wait <id>' to collect the result.",
+        aliases: ["temporary", "run-temp"]
+    )
+
+    @Argument(help: "Command to run through a login shell, for example 'npm run build'.")
+    var command: String?
+
+    @Option(name: .long, help: "Short label shown in Portly. Defaults to the command.")
+    var name: String?
+
+    @Option(name: .customLong("command"), help: "Command option kept for compatibility; prefer the positional command.")
+    var commandOption: String?
+
+    @Option(name: .long, help: "Working directory. Defaults to the current directory.")
+    var path = FileManager.default.currentDirectoryPath
+
+    @Option(name: .long, help: "Optional port to monitor.")
+    var port: Int?
+
+    @Option(name: .long, help: "Optional health check path or URL.")
+    var healthUrl: String?
+
+    @Option(name: .long, help: "Maximum runtime: seconds or a value such as 30s, 10m, or 2h.")
+    var timeout = "30m"
+
+    @Option(name: .long, parsing: .upToNextOption, help: "Environment variables as KEY=VALUE.")
+    var env: [String] = []
+
+    @OptionGroup var options: GlobalOptions
+
+    func run() throws {
+        guard command == nil || commandOption == nil else {
+            fail("Pass the command either positionally or with --command, not both")
+        }
+        guard let selectedCommand = (command ?? commandOption)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !selectedCommand.isEmpty else {
+            fail("Missing command. Example: portly temp 'npm run build'")
+        }
+        guard let timeoutSeconds = TemporaryTimeout.parse(timeout) else {
+            fail("Bad --timeout '\(timeout)'. Use 30s, 10m, 2h, or seconds up to 7 days")
+        }
+        let selectedName = name.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap { $0.isEmpty ? nil : $0 }
+            ?? selectedCommand.split(whereSeparator: \.isWhitespace).prefix(4).joined(separator: " ")
+        var parsedEnvironment: [String: String] = [:]
+        for entry in env {
+            let parts = entry.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2 else { fail("Bad --env value '\(entry)', expected KEY=VALUE") }
+            parsedEnvironment[String(parts[0])] = String(parts[1])
+        }
+        let body = PortlyAPI.RunTemporaryRequest(
+            name: selectedName,
+            command: selectedCommand,
+            directory: path,
+            port: port,
+            env: parsedEnvironment.isEmpty ? nil : parsedEnvironment,
+            healthURL: healthUrl,
+            timeoutSeconds: timeoutSeconds
+        )
+        do {
+            let job = try client(options).post("temporary/run", body, as: TemporaryJobStatus.self)
+            emit(job, json: options.json) { $0.id }
+        } catch {
+            fail(error.localizedDescription)
+        }
+    }
+}
+
+// MARK: - Temporary jobs
+
+struct Wait: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "wait",
+        abstract: "Wait for a temporary job and return its exit code.",
+        discussion: "The job keeps running under Portly if this command is interrupted. Completed job metadata remains available for one hour."
+    )
+
+    @Argument(help: "Temporary job ID returned by 'portly temp'.")
+    var id: String
+
+    @Option(name: .shortAndLong, help: "Maximum number of captured log lines to print after completion.")
+    var tail = 500
+
+    @Flag(name: .customLong("no-logs"), help: "Print only the final result.")
+    var noLogs = false
+
+    @OptionGroup var options: GlobalOptions
+
+    func run() throws {
+        let escaped = id.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? id
+        var job: TemporaryJobStatus
+        do {
+            job = try client(options).get("temporary/status?id=\(escaped)", as: TemporaryJobStatus.self)
+            while !job.state.isFinished {
+                Thread.sleep(forTimeInterval: 0.25)
+                job = try client(options).get("temporary/status?id=\(escaped)", as: TemporaryJobStatus.self)
+            }
+
+            if options.json {
+                emit(job, json: true) { _ in "" }
+            } else {
+                if !noLogs {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    let count = min(max(tail, 1), 5_000)
+                    let logs = try client(options).get("logs?server=\(escaped)&tail=\(count)", as: PortlyAPI.LogsResponse.self)
+                    if !logs.lines.isEmpty { print(logs.lines.joined(separator: "\n")) }
+                }
+                print(jobSummary(job))
+            }
+        } catch {
+            fail(error.localizedDescription)
+        }
+
+        Darwin.exit(job.processExitCode)
+    }
+}
+
+private func jobSummary(_ job: TemporaryJobStatus) -> String {
+    let elapsed = job.elapsedSeconds.map { String(format: "%.1fs", $0) } ?? "unknown duration"
+    let exitCode = job.exitCode.map { " · exit \($0)" } ?? ""
+    switch job.state {
+    case .succeeded: return "✓ \(job.id) succeeded · \(elapsed)\(exitCode)"
+    case .failed: return "✕ \(job.id) failed · \(elapsed)\(exitCode)"
+    case .timedOut: return "✕ \(job.id) timed out after \(TemporaryTimeout.display(job.timeoutSeconds))"
+    case .stopped: return "○ \(job.id) stopped · \(elapsed)"
+    case .running: return "◐ \(job.id) running"
+    }
+}
+
 struct AddProject: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "add-project",
@@ -220,10 +454,21 @@ struct AddProject: ParsableCommand {
     @Option(name: .long, help: "Hex color for the project icon.")
     var color: String?
 
+    @Option(name: .long, help: "Project memory policy: inherit, off, or a size such as 5GB.")
+    var memoryLimit: String?
+
     @OptionGroup var options: GlobalOptions
 
     func run() throws {
-        let body = PortlyAPI.AddProjectRequest(name: name, root: path, icon: icon, color: color)
+        let selection = memoryLimit.map { parseMemoryLimit($0, allowInherit: true) }
+        let body = PortlyAPI.AddProjectRequest(
+            name: name,
+            root: path,
+            icon: icon,
+            color: color,
+            memoryLimitMode: selection?.mode,
+            memoryLimitBytes: selection?.bytes
+        )
         do {
             let project = try client(options).post("projects/add", body, as: Project.self)
             emit(project, json: options.json) { "Added project \($0.name) (\($0.id))" }
@@ -231,6 +476,76 @@ struct AddProject: ParsableCommand {
             fail(error.localizedDescription)
         }
     }
+}
+
+struct MemoryLimit: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "memory-limit",
+        abstract: "Show or configure automatic project restarts by memory footprint.",
+        discussion: "Without a project, the value becomes the global default. A project accepts inherit, off, or a custom size. Limits trigger after three consecutive samples, then sampling starts fresh on the replacement processes.",
+        aliases: ["ram-limit"]
+    )
+
+    @Argument(help: "A size such as 5GB/5Go, off, or inherit for a project.")
+    var value: String?
+
+    @Option(name: .long, help: "Project name or ID. Omit to configure the global default.")
+    var project: String?
+
+    @OptionGroup var options: GlobalOptions
+
+    func run() throws {
+        guard let value else {
+            do {
+                let status = try client(options).get("status", as: PortlyStatus.self)
+                emit(status, json: options.json, human: renderMemoryLimits)
+            } catch {
+                fail(error.localizedDescription)
+            }
+            return
+        }
+
+        let selection = parseMemoryLimit(value, allowInherit: project != nil)
+        let body = PortlyAPI.UpdateMemoryLimitRequest(
+            project: project,
+            mode: selection.mode,
+            bytes: selection.bytes
+        )
+        do {
+            let response = try client(options).post("memory-limit", body, as: PortlyAPI.ActionResponse.self)
+            emit(response, json: options.json) { $0.message }
+        } catch {
+            fail(error.localizedDescription)
+        }
+    }
+}
+
+private func parseMemoryLimit(_ raw: String, allowInherit: Bool) -> (mode: MemoryLimitMode, bytes: UInt64?) {
+    let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if ["off", "disabled", "none"].contains(value) { return (.disabled, nil) }
+    if value == "inherit" {
+        guard allowInherit else { fail("The global memory limit cannot inherit; use a size or off") }
+        return (.inherit, nil)
+    }
+    guard let bytes = MemorySize.parse(value) else {
+        fail("Bad memory limit '\(raw)'. Use a value from 128MB to 1TB, for example 5GB, or use off")
+    }
+    return (.custom, bytes)
+}
+
+private func renderMemoryLimits(_ status: PortlyStatus) -> String {
+    var lines = ["Global: \(status.globalMemoryLimitBytes.map(MemorySize.display) ?? "off")"]
+    for project in status.projects {
+        let effective = project.effectiveMemoryLimitBytes.map(MemorySize.display) ?? "off"
+        let policy: String
+        switch project.memoryLimitMode {
+        case .inherit: policy = "inherit"
+        case .disabled: policy = "off"
+        case .custom: policy = project.memoryLimitBytes.map(MemorySize.display) ?? "invalid"
+        }
+        lines.append("\(project.name): \(policy) → \(effective)")
+    }
+    return lines.joined(separator: "\n")
 }
 
 struct AddServer: ParsableCommand {
@@ -429,11 +744,24 @@ struct KillPort: ParsableCommand {
 
 struct Open: ParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Bring the Portly window to the front.")
+
+    @Flag(name: .long, help: "Open the resource and memory dashboard.")
+    var resources = false
+
+    @Flag(name: .long, help: "Open the port inspector.")
+    var ports = false
+
     @OptionGroup var options: GlobalOptions
 
     func run() throws {
+        guard !(resources && ports) else { fail("Choose either --resources or --ports") }
         do {
-            let response = try client(options).post("open", PortlyAPI.Empty(), as: PortlyAPI.ActionResponse.self)
+            let destination = resources ? "resources" : ports ? "ports" : nil
+            let response = try client(options).post(
+                "open",
+                PortlyAPI.OpenRequest(destination: destination),
+                as: PortlyAPI.ActionResponse.self
+            )
             emit(response, json: options.json) { $0.message }
         } catch {
             fail(error.localizedDescription)
