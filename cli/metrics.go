@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -93,14 +92,6 @@ func sampleMetrics(rootPIDs map[int]struct{}) map[int]processMetrics {
 	return totals
 }
 
-func listProcesses() []procRecord {
-	if runtime.GOOS == "linux" {
-		if recs := listLinuxProcesses(); len(recs) > 0 {
-			return recs
-		}
-	}
-	return listPSProcesses()
-}
 
 func listLinuxProcesses() []procRecord {
 	entries, err := os.ReadDir("/proc")

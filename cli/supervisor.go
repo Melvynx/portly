@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -356,7 +355,7 @@ func (s *supervisor) terminateEverything() {
 	}
 	for _, rt := range s.allRuntimes() {
 		if pid := rt.currentPID(); pid > 0 {
-			_ = syscall.Kill(-pid, syscall.SIGKILL)
+			killProcessTree(pid)
 		}
 	}
 }
@@ -666,6 +665,9 @@ func (s *supervisor) isTemporaryID(id string) bool {
 
 func (s *supervisor) close() {
 	s.store.stopWatching()
+	for _, rt := range s.allRuntimes() {
+		rt.logs.closeFile()
+	}
 	select {
 	case <-s.quit:
 	default:

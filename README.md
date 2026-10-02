@@ -53,6 +53,17 @@ Do not run the macOS app and this daemon on the same host: they both claim `127.
 
 Docs: [portly.melvynx.dev/linux](https://portly.melvynx.dev/linux)
 
+## Windows
+
+The same headless supervisor in [`cli/`](cli) builds natively for Windows (no WSL):
+
+```powershell
+cd cli
+go build -o $HOME\.local\bin\portly.exe .
+```
+
+Commands run through `cmd.exe /c`, so use `%PORT%` in server commands. Each server lives in a Job Object, so stopping it, `portly quit`, or a daemon crash ends its whole process tree. Port owners are found with `netstat`, and metrics come from the Win32 process APIs. Stops are immediate because Windows has no SIGTERM for console processes, and `forever` is not available: any `portly` command starts the daemon on demand.
+
 ## Updates and releases
 
 Portly checks the signed Sparkle feed once a day and also exposes **Check for Updates…** in the app menu and Settings. The installed version is visible in Settings and in the standard About window.
