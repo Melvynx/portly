@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
-	"syscall"
 	"time"
 )
 
@@ -61,13 +60,12 @@ func (c *portlyClient) launchDaemonIfNeeded() error {
 		args = append(args, "--api-port", strconv.Itoa(c.port))
 	}
 	cmd := exec.Command(exe, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	_ = ensureDirs()
 	if log, err := os.OpenFile(daemonLogFile(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
 		cmd.Stdout = log
 		cmd.Stderr = log
 	}
-	if err := cmd.Start(); err != nil {
+	if err := startDetached(cmd); err != nil {
 		return clientError{msg: "Portly is not running and could not be launched. " + err.Error()}
 	}
 	deadline := time.Now().Add(20 * time.Second)

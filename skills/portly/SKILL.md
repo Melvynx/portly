@@ -116,3 +116,7 @@ Use `portly forever disable --json` to unload the LaunchAgent recoverably while 
 ## Linux
 
 On Linux, use the headless `portly` binary from this repository's `cli/` folder. It is the supervisor: commands auto-start a loopback daemon and speak the same API as macOS. Do not install `Portly.app`. `open` has no window and reports that. `forever` uses a systemd user unit, not launchd; it errors clearly when systemd is missing. Do not run the macOS app and the Linux daemon against the same `7737` port.
+
+## Windows
+
+On Windows, use the same headless `portly.exe` built from `cli/` (no app, no WSL). Server commands run through `cmd.exe /c`, so reference the injected port as `%PORT%` (for example `pnpm dev --port %PORT%`). Each server runs in a Job Object: stopping it, quitting Portly, or a daemon crash ends the whole process tree. Stops are immediate (Windows has no SIGTERM for console processes). `forever` is unavailable; any `portly` command starts the daemon on demand.
