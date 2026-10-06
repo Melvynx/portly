@@ -3,6 +3,9 @@
 
 set -euo pipefail
 
+# Portly runs jobs in a PTY, where gh would otherwise open an interactive pager.
+export GH_PAGER=cat PAGER=cat
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VERSION="$(git -C "$ROOT" show HEAD:Sources/PortlyCore/Version.swift | grep -o '"[0-9][^"]*"' | tr -d '"')"
 EXPECTED_VERSION="${1:-$VERSION}"
