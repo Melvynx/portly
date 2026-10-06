@@ -134,10 +134,6 @@ struct SidebarSearchField: View {
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
-        .padding(.horizontal, 10)
-        .padding(.top, 8)
-        .padding(.bottom, 6)
-        .background(.bar)
         .help("Filter the sidebar by project, server, or port")
     }
 }

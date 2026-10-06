@@ -245,11 +245,43 @@ struct MainView: View {
     }
 
     private var sidebarSearch: some View {
-        SidebarSearchField(
-            text: $search,
-            focused: $searchFocused,
-            onSubmit: activateFirstMatch
-        )
+        HStack(spacing: 6) {
+            SidebarSearchField(
+                text: $search,
+                focused: $searchFocused,
+                onSubmit: activateFirstMatch
+            )
+
+            killAllButton
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 8)
+        .padding(.bottom, 6)
+        .background(.bar)
+    }
+
+    private var killAllButton: some View {
+        Button {
+            supervisor.stopAll()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "stop.fill")
+                Text("Kill All")
+            }
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(supervisor.runningCount == 0 ? Color.secondary.opacity(0.45) : Color.primary.opacity(0.78))
+            .padding(.horizontal, 8)
+            .frame(height: 28)
+            .background {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.primary.opacity(0.055))
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(supervisor.runningCount == 0)
+        .help(supervisor.runningCount == 0 ? "No running processes" : "Stop every running server and temporary process")
+        .accessibilityLabel("Kill All")
+        .accessibilityHint("Stops every running server and temporary process")
     }
 
     private var sidebarActions: some View {

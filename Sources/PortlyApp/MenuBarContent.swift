@@ -157,11 +157,13 @@ struct MenuBarContent: View {
 
             Spacer()
 
-            Button("Stop All") {
+            Button("Kill All") {
                 supervisor.stopAll()
             }
             .buttonStyle(.borderless)
             .disabled(supervisor.runningCount == 0)
+            .help("Stop every running server and temporary process")
+            .accessibilityLabel("Kill All")
 
             Button("Quit") {
                 NSApplication.shared.terminate(nil)
