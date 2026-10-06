@@ -33,6 +33,9 @@ public struct ServerConfig: Codable, Identifiable, Hashable {
     public var autoRestart: Bool
     /// Maintenance commands that run beside the server without restarting it.
     public var actions: [ServerAction]
+    /// Seconds without output or CPU activity before Portly stops the server.
+    /// Nil inherits the global default, 0 turns it off for this server.
+    public var idleTimeoutSeconds: Int?
 
     public init(
         id: String = ServerConfig.newID(),
@@ -44,7 +47,8 @@ public struct ServerConfig: Codable, Identifiable, Hashable {
         healthURL: String? = nil,
         healthStatus: Int? = nil,
         autoRestart: Bool = true,
-        actions: [ServerAction] = []
+        actions: [ServerAction] = [],
+        idleTimeoutSeconds: Int? = nil
     ) {
         self.id = id
         self.name = name
@@ -56,9 +60,15 @@ public struct ServerConfig: Codable, Identifiable, Hashable {
         self.healthStatus = healthStatus
         self.autoRestart = autoRestart
         self.actions = actions
+        self.idleTimeoutSeconds = idleTimeoutSeconds
     }
 
     public static func newID() -> String { "srv_" + String(UUID().uuidString.prefix(8)).lowercased() }
+
+    public func effectiveIdleTimeout(global: Int?) -> Int? {
+        guard let seconds = idleTimeoutSeconds ?? global, seconds > 0 else { return nil }
+        return seconds
+    }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -72,6 +82,30 @@ public struct ServerConfig: Codable, Identifiable, Hashable {
         healthStatus = try c.decodeIfPresent(Int.self, forKey: .healthStatus)
         autoRestart = try c.decodeIfPresent(Bool.self, forKey: .autoRestart) ?? true
         actions = try c.decodeIfPresent([ServerAction].self, forKey: .actions) ?? []
+        idleTimeoutSeconds = try c.decodeIfPresent(Int.self, forKey: .idleTimeoutSeconds)
+    }
+}
+
+public enum IdleTimeout {
+    public static let minimumSeconds = 60
+    public static let maximumSeconds = TemporaryTimeout.maximumSeconds
+    public static let presets = [15 * 60, 30 * 60, 60 * 60, 2 * 3_600, 4 * 3_600]
+
+    public static func isValid(_ seconds: Int) -> Bool {
+        (minimumSeconds...maximumSeconds).contains(seconds)
+    }
+
+    /// Durations such as 30m or 2h. Bare numbers are seconds, like `--timeout`.
+    public static func parse(_ raw: String) -> Int? {
+        guard let seconds = TemporaryTimeout.parse(raw), isValid(seconds) else { return nil }
+        return seconds
+    }
+
+    public static func describe(_ seconds: Int) -> String {
+        func plural(_ value: Int, _ unit: String) -> String { "\(value) \(unit)\(value == 1 ? "" : "s")" }
+        if seconds.isMultiple(of: 3_600) { return plural(seconds / 3_600, "hour") }
+        if seconds.isMultiple(of: 60) { return plural(seconds / 60, "minute") }
+        return plural(seconds, "second")
     }
 }
 
@@ -202,6 +236,8 @@ public struct PortlyConfig: Codable {
     public var logFileMaxMB: Int
     /// Default project footprint limit. Nil keeps automatic memory restarts off.
     public var globalMemoryLimitBytes: UInt64?
+    /// Default inactivity timeout for configured servers. Nil keeps idle stops off.
+    public var idleTimeoutSeconds: Int?
     public var projects: [Project]
 
     public static let defaultAPIPort = 7737
@@ -214,6 +250,7 @@ public struct PortlyConfig: Codable {
         logBufferLines: Int = 5000,
         logFileMaxMB: Int = 10,
         globalMemoryLimitBytes: UInt64? = nil,
+        idleTimeoutSeconds: Int? = nil,
         projects: [Project] = []
     ) {
         self.version = version
@@ -223,6 +260,7 @@ public struct PortlyConfig: Codable {
         self.logBufferLines = logBufferLines
         self.logFileMaxMB = logFileMaxMB
         self.globalMemoryLimitBytes = globalMemoryLimitBytes
+        self.idleTimeoutSeconds = idleTimeoutSeconds
         self.projects = projects
     }
 
@@ -235,6 +273,7 @@ public struct PortlyConfig: Codable {
         logBufferLines = try c.decodeIfPresent(Int.self, forKey: .logBufferLines) ?? 5000
         logFileMaxMB = try c.decodeIfPresent(Int.self, forKey: .logFileMaxMB) ?? 10
         globalMemoryLimitBytes = try c.decodeIfPresent(UInt64.self, forKey: .globalMemoryLimitBytes)
+        idleTimeoutSeconds = try c.decodeIfPresent(Int.self, forKey: .idleTimeoutSeconds)
         projects = try c.decodeIfPresent([Project].self, forKey: .projects) ?? []
     }
 
@@ -408,6 +447,12 @@ public struct ServerStatus: Codable, Identifiable, Hashable {
     public var deadline: Date?
     public var finishedAt: Date?
     public var timedOut: Bool?
+    /// Effective inactivity timeout after inheritance. Nil when idle stops are off.
+    public var idleTimeoutSeconds: Int?
+    /// Last output, terminal input, or CPU activity while the process runs.
+    public var lastActivityAt: Date?
+    /// Set when the last stop came from the inactivity timeout.
+    public var idleStoppedAt: Date?
 
     public init(
         id: String, name: String, projectID: String, projectName: String,
@@ -417,7 +462,8 @@ public struct ServerStatus: Codable, Identifiable, Hashable {
         cpuPercent: Double? = nil, memoryBytes: UInt64? = nil,
         residentMemoryBytes: UInt64? = nil, processCount: Int? = nil,
         temporary: Bool? = nil, timeoutSeconds: Int? = nil,
-        deadline: Date? = nil, finishedAt: Date? = nil, timedOut: Bool? = nil
+        deadline: Date? = nil, finishedAt: Date? = nil, timedOut: Bool? = nil,
+        idleTimeoutSeconds: Int? = nil, lastActivityAt: Date? = nil, idleStoppedAt: Date? = nil
     ) {
         self.id = id
         self.name = name
@@ -443,6 +489,9 @@ public struct ServerStatus: Codable, Identifiable, Hashable {
         self.deadline = deadline
         self.finishedAt = finishedAt
         self.timedOut = timedOut
+        self.idleTimeoutSeconds = idleTimeoutSeconds
+        self.lastActivityAt = lastActivityAt
+        self.idleStoppedAt = idleStoppedAt
     }
 }
 
@@ -505,6 +554,7 @@ public struct PortlyStatus: Codable {
     public var version: String
     public var apiPort: Int
     public var globalMemoryLimitBytes: UInt64?
+    public var globalIdleTimeoutSeconds: Int?
     public var projects: [ProjectStatus]
     /// Ephemeral processes supervised for the current app session. They are not
     /// projects and never persist in config.json.
@@ -514,12 +564,14 @@ public struct PortlyStatus: Codable {
         version: String,
         apiPort: Int,
         globalMemoryLimitBytes: UInt64? = nil,
+        globalIdleTimeoutSeconds: Int? = nil,
         projects: [ProjectStatus],
         temporaryServers: [ServerStatus] = []
     ) {
         self.version = version
         self.apiPort = apiPort
         self.globalMemoryLimitBytes = globalMemoryLimitBytes
+        self.globalIdleTimeoutSeconds = globalIdleTimeoutSeconds
         self.projects = projects
         self.temporaryServers = temporaryServers
     }
@@ -529,6 +581,7 @@ public struct PortlyStatus: Codable {
         version = try container.decode(String.self, forKey: .version)
         apiPort = try container.decode(Int.self, forKey: .apiPort)
         globalMemoryLimitBytes = try container.decodeIfPresent(UInt64.self, forKey: .globalMemoryLimitBytes)
+        globalIdleTimeoutSeconds = try container.decodeIfPresent(Int.self, forKey: .globalIdleTimeoutSeconds)
         projects = try container.decode([ProjectStatus].self, forKey: .projects)
         temporaryServers = try container.decodeIfPresent([ServerStatus].self, forKey: .temporaryServers) ?? []
     }

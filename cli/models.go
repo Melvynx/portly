@@ -60,6 +60,20 @@ type ServerConfig struct {
 	HealthStatus *int              `json:"healthStatus"`
 	AutoRestart  bool              `json:"autoRestart"`
 	Actions      []ServerAction    `json:"actions"`
+	// Nil inherits the global default, 0 turns idle stops off for this server.
+	IdleTimeoutSeconds *int `json:"idleTimeoutSeconds,omitempty"`
+}
+
+func (s ServerConfig) effectiveIdleTimeout(global *int) *int {
+	value := s.IdleTimeoutSeconds
+	if value == nil {
+		value = global
+	}
+	if value == nil || *value <= 0 {
+		return nil
+	}
+	seconds := *value
+	return &seconds
 }
 
 func newServerConfig(name, command string) ServerConfig {
@@ -178,6 +192,7 @@ type PortlyConfig struct {
 	LogBufferLines         int       `json:"logBufferLines"`
 	LogFileMaxMB           int       `json:"logFileMaxMB"`
 	GlobalMemoryLimitBytes *uint64   `json:"globalMemoryLimitBytes,omitempty"`
+	IdleTimeoutSeconds     *int      `json:"idleTimeoutSeconds,omitempty"`
 	Projects               []Project `json:"projects"`
 }
 
@@ -350,6 +365,9 @@ type ServerStatus struct {
 	Deadline            *isoTime    `json:"deadline,omitempty"`
 	FinishedAt          *isoTime    `json:"finishedAt,omitempty"`
 	TimedOut            *bool       `json:"timedOut,omitempty"`
+	IdleTimeoutSeconds  *int        `json:"idleTimeoutSeconds,omitempty"`
+	LastActivityAt      *isoTime    `json:"lastActivityAt,omitempty"`
+	IdleStoppedAt       *isoTime    `json:"idleStoppedAt,omitempty"`
 }
 
 type ProjectStatus struct {
@@ -367,11 +385,12 @@ type ProjectStatus struct {
 }
 
 type PortlyStatus struct {
-	Version                string          `json:"version"`
-	APIPort                int             `json:"apiPort"`
-	GlobalMemoryLimitBytes *uint64         `json:"globalMemoryLimitBytes,omitempty"`
-	Projects               []ProjectStatus `json:"projects"`
-	TemporaryServers       []ServerStatus  `json:"temporaryServers"`
+	Version                  string          `json:"version"`
+	APIPort                  int             `json:"apiPort"`
+	GlobalMemoryLimitBytes   *uint64         `json:"globalMemoryLimitBytes,omitempty"`
+	GlobalIdleTimeoutSeconds *int            `json:"globalIdleTimeoutSeconds,omitempty"`
+	Projects                 []ProjectStatus `json:"projects"`
+	TemporaryServers         []ServerStatus  `json:"temporaryServers"`
 }
 
 type PortOccupant struct {
@@ -413,17 +432,18 @@ type addProjectRequest struct {
 }
 
 type addServerRequest struct {
-	Project      string            `json:"project"`
-	Name         string            `json:"name"`
-	Command      string            `json:"command"`
-	Port         *int              `json:"port"`
-	Directory    *string           `json:"directory"`
-	Env          map[string]string `json:"env"`
-	HealthURL    *string           `json:"healthURL"`
-	HealthStatus *int              `json:"healthStatus"`
-	AutoRestart  *bool             `json:"autoRestart"`
-	Actions      []ServerAction    `json:"actions"`
-	Start        *bool             `json:"start"`
+	Project            string            `json:"project"`
+	Name               string            `json:"name"`
+	Command            string            `json:"command"`
+	Port               *int              `json:"port"`
+	Directory          *string           `json:"directory"`
+	Env                map[string]string `json:"env"`
+	HealthURL          *string           `json:"healthURL"`
+	HealthStatus       *int              `json:"healthStatus"`
+	AutoRestart        *bool             `json:"autoRestart"`
+	Actions            []ServerAction    `json:"actions"`
+	IdleTimeoutSeconds *int              `json:"idleTimeoutSeconds"`
+	Start              *bool             `json:"start"`
 }
 
 type updateServerRequest struct {
@@ -473,6 +493,12 @@ type updateMemoryLimitRequest struct {
 	Project *string         `json:"project"`
 	Mode    MemoryLimitMode `json:"mode"`
 	Bytes   *uint64         `json:"bytes"`
+}
+
+// Seconds 0 turns idle stops off. A nil Seconds is only valid with Server and inherits.
+type updateIdleTimeoutRequest struct {
+	Server  *string `json:"server,omitempty"`
+	Seconds *int    `json:"seconds,omitempty"`
 }
 
 type openRequest struct {

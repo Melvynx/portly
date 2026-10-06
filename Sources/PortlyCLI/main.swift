@@ -65,7 +65,16 @@ extension ServerStatus {
         }
         let timeout = timeoutSeconds.map { " timeout:\(TemporaryTimeout.display($0))" } ?? ""
         let exitCode = lastExitCode.map { " exit:\($0)" } ?? ""
-        return "  \(stateGlyph) \(name)\(port)  \(outcome)\(duration)\(timeout)\(exitCode)\(cpu)\(memory)\(resident)\(processes)\(restarts)"
+        return "  \(stateGlyph) \(name)\(port)  \(outcome)\(duration)\(timeout)\(exitCode)\(cpu)\(memory)\(resident)\(processes)\(restarts)\(idleSummary)"
+    }
+
+    var idleSummary: String {
+        if state == .stopped, let stoppedAt = idleStoppedAt {
+            return " idle-stopped:\(stoppedAt.formatted(date: .omitted, time: .shortened))"
+        }
+        guard let idleTimeoutSeconds else { return "" }
+        let quiet = lastActivityAt.map { " quiet:\(TemporaryTimeout.display(max(0, Int(Date().timeIntervalSince($0)))))" } ?? ""
+        return " idle-stop:\(TemporaryTimeout.display(idleTimeoutSeconds))\(quiet)"
     }
 }
 
@@ -184,7 +193,7 @@ struct Portly: ParsableCommand {
         subcommands: [
             Status.self, Start.self, Stop.self, Restart.self, Action.self, Logs.self,
             Temp.self, Wait.self, AddProject.self, AddServer.self, UpdateServer.self,
-            MemoryLimit.self, Remove.self, TakeOver.self, Port.self, KillPort.self, Open.self, Quit.self, Forever.self, Config.self,
+            MemoryLimit.self, IdleTimeoutCommand.self, Remove.self, TakeOver.self, Port.self, KillPort.self, Open.self, Quit.self, Forever.self, Config.self,
         ],
         defaultSubcommand: Status.self
     )
@@ -583,6 +592,72 @@ private func renderMemoryLimits(_ status: PortlyStatus) -> String {
     return lines.joined(separator: "\n")
 }
 
+struct IdleTimeoutCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "idle-timeout",
+        abstract: "Show or configure automatic stops for inactive servers.",
+        discussion: "A server is inactive when it prints nothing and stays under 5% CPU. Output that answers Portly's own health checks does not count. Without --server, the value becomes the global default. A server accepts inherit, off, or a duration. Temporary jobs keep their own --timeout.",
+        aliases: ["idle"]
+    )
+
+    @Argument(help: "A duration such as 30m or 2h, off, or inherit for a server.")
+    var value: String?
+
+    @Option(name: .long, help: "Server name or id (project/server to disambiguate). Omit to configure the global default.")
+    var server: String?
+
+    @OptionGroup var options: GlobalOptions
+
+    func run() throws {
+        guard let value else {
+            do {
+                let status = try client(options).get("status", as: PortlyStatus.self)
+                emit(status, json: options.json, human: renderIdleTimeouts)
+            } catch {
+                fail(error.localizedDescription)
+            }
+            return
+        }
+
+        let body = PortlyAPI.UpdateIdleTimeoutRequest(
+            server: server,
+            seconds: parseIdleTimeout(value, allowInherit: server != nil)
+        )
+        do {
+            let response = try client(options).post("idle-timeout", body, as: PortlyAPI.ActionResponse.self)
+            emit(response, json: options.json) { $0.message }
+        } catch {
+            fail(error.localizedDescription)
+        }
+    }
+}
+
+/// Nil means inherit, 0 means off.
+private func parseIdleTimeout(_ raw: String, allowInherit: Bool) -> Int? {
+    let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if ["off", "disabled", "none", "never", "0"].contains(value) { return 0 }
+    if value == "inherit" {
+        guard allowInherit else { fail("The global idle timeout cannot inherit; use a duration or off") }
+        return nil
+    }
+    guard let seconds = IdleTimeout.parse(value) else {
+        fail("Bad idle timeout '\(raw)'. Use a duration from 1m to 7 days, for example 30m or 2h, or off")
+    }
+    return seconds
+}
+
+private func renderIdleTimeouts(_ status: PortlyStatus) -> String {
+    let global = status.globalIdleTimeoutSeconds.map(TemporaryTimeout.display) ?? "off"
+    var lines = ["Global: \(global)"]
+    for project in status.projects {
+        for server in project.servers {
+            let effective = server.idleTimeoutSeconds.map(TemporaryTimeout.display) ?? "off"
+            lines.append("\(project.name)/\(server.name): \(effective)")
+        }
+    }
+    return lines.joined(separator: "\n")
+}
+
 struct AddServer: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "add-server",
@@ -616,12 +691,16 @@ struct AddServer: ParsableCommand {
     @Flag(name: .long, inversion: .prefixedNo, help: "Restart automatically after a crash.")
     var autoRestart = true
 
+    @Option(name: .long, help: "Stop after this long without output or CPU activity: a duration such as 30m, off, or inherit (default).")
+    var idleTimeout: String?
+
     @Flag(name: .long, help: "Start the server right after adding it.")
     var start = false
 
     @OptionGroup var options: GlobalOptions
 
     func run() throws {
+        let idleTimeoutSeconds = idleTimeout.flatMap { parseIdleTimeout($0, allowInherit: true) }
         var parsedEnv: [String: String] = [:]
         for entry in env {
             let parts = entry.split(separator: "=", maxSplits: 1)
@@ -633,7 +712,8 @@ struct AddServer: ParsableCommand {
             project: project, name: name, command: command, port: port,
             directory: directory, env: parsedEnv.isEmpty ? nil : parsedEnv,
             healthURL: healthUrl, healthStatus: nil,
-            autoRestart: autoRestart, actions: parsedActions.isEmpty ? nil : parsedActions, start: start
+            autoRestart: autoRestart, actions: parsedActions.isEmpty ? nil : parsedActions,
+            idleTimeoutSeconds: idleTimeoutSeconds, start: start
         )
         do {
             let server = try client(options).post("servers/add", body, as: ServerConfig.self)

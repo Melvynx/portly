@@ -173,6 +173,7 @@ final class Supervisor: ObservableObject {
                 }
                 self.recordResourceHistory(samples: sample.managedByRoot, targets: targets)
                 self.evaluateMemoryLimits(samples: sample.managedByRoot, targets: targets)
+                self.runtimes.values.forEach { $0.stopIfIdle() }
                 self.bump()
             }
         }
@@ -289,6 +290,7 @@ final class Supervisor: ObservableObject {
             version: portlyVersion,
             apiPort: store.config.apiPort,
             globalMemoryLimitBytes: store.config.globalMemoryLimitBytes,
+            globalIdleTimeoutSeconds: store.config.idleTimeoutSeconds,
             projects: store.config.projects.map { project in
                 let memoryRestart = memoryLimitRestarts[project.id]
                 return ProjectStatus(
@@ -464,6 +466,23 @@ final class Supervisor: ObservableObject {
         refresh()
     }
 
+    func updateGlobalIdleTimeout(_ seconds: Int?) {
+        store.mutate { $0.idleTimeoutSeconds = seconds.flatMap { $0 > 0 ? $0 : nil } }
+        refresh()
+    }
+
+    func updateServerIdleTimeout(serverID: String, seconds: Int?) {
+        store.mutate { config in
+            for (pIdx, project) in config.projects.enumerated() {
+                if let sIdx = project.servers.firstIndex(where: { $0.id == serverID }) {
+                    config.projects[pIdx].servers[sIdx].idleTimeoutSeconds = seconds
+                    return
+                }
+            }
+        }
+        refresh()
+    }
+
     func removeProject(id: String) {
         runtimes(inProject: id).forEach { $0.stop() }
         store.mutate { config in
@@ -609,13 +628,15 @@ final class Supervisor: ObservableObject {
         healthIntervalSeconds: Int,
         maxRestartAttempts: Int,
         logBufferLines: Int,
-        logFileMaxMB: Int
+        logFileMaxMB: Int,
+        idleTimeoutSeconds: Int?
     ) {
         store.mutate { config in
             config.healthIntervalSeconds = healthIntervalSeconds
             config.maxRestartAttempts = maxRestartAttempts
             config.logBufferLines = logBufferLines
             config.logFileMaxMB = logFileMaxMB
+            config.idleTimeoutSeconds = idleTimeoutSeconds.flatMap { $0 > 0 ? $0 : nil }
         }
         refresh()
     }

@@ -38,6 +38,7 @@ The Portly installer also adds this rule, between `portly:managed-rule` markers,
 | `wait` | Wait for a temporary job and return its real exit code |
 | `action` | Run a configured maintenance action without restarting the server |
 | `memory-limit`, `ram-limit` | Show or configure automatic project restarts by footprint |
+| `idle-timeout`, `idle` | Show or configure automatic stops for inactive servers |
 | `start`, `stop`, `restart` | Control a server or every server in `--project` |
 | `logs` | Read captured output with `--tail` |
 | `add-project`, `add-server`, `update-server`, `remove` | Manage configuration |
@@ -62,6 +63,12 @@ Run `portly memory-limit` to inspect the effective policy. The global value is a
 Projects inherit the global value by default. Override one with `portly memory-limit 3GB --project <project>`, exempt it with `portly memory-limit off --project <project>`, or restore inheritance with `portly memory-limit inherit --project <project>`. `GB`, `Go`, `MB`, and `Mo` are accepted.
 
 Portly evaluates total project footprint every two seconds. Three consecutive samples above the effective limit restart every running server in that project, then sampling starts fresh on the replacement processes. Configure these policies in Settings → Memory. Never enable or lower a memory limit without the user's authorization: changing it can restart active workloads.
+
+## Idle stop
+
+Run `portly idle-timeout` to inspect the policy. `portly idle-timeout 30m` stops any server that prints no output and stays under 5% CPU for 30 minutes; output answering Portly's own health checks does not count. Servers inherit the global value. Use `portly idle-timeout off --server <project/server>` for databases, queues, and quiet workers, a custom duration (`--server <project/server> 2h`) to override, or `inherit` to restore the default. Accepted range is 1 minute to 7 days. Temporary jobs keep their own `--timeout`.
+
+An idle stop is a normal stop: no automatic restart, `lastError` explains it, and `idleStoppedAt` is set in `portly status --json`. If a server you need was idle-stopped, start it again with `portly start <project/server>`. Do not enable or shorten the idle timeout without the user's authorization.
 
 ## Add and verify a server
 

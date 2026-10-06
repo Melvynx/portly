@@ -47,6 +47,7 @@ func startAPI(sup *supervisor, port int) (*apiServer, error) {
 	mux.HandleFunc("/temporary/run", srv.post(srv.runTemporary))
 	mux.HandleFunc("/actions/run", srv.post(srv.runAction))
 	mux.HandleFunc("/memory-limit", srv.post(srv.memoryLimit))
+	mux.HandleFunc("/idle-timeout", srv.post(srv.idleTimeout))
 	mux.HandleFunc("/ports/kill", srv.post(srv.killPort))
 	mux.HandleFunc("/open", srv.post(srv.open))
 	mux.HandleFunc("/quit", srv.post(srv.quit))
@@ -260,7 +261,12 @@ func (s *apiServer) addServer(w http.ResponseWriter, r *http.Request) {
 		writeFail(w, http.StatusBadRequest, "Actions need unique non-empty names and non-empty commands")
 		return
 	}
+	if body.IdleTimeoutSeconds != nil && !validIdleTimeout(*body.IdleTimeoutSeconds) {
+		writeFail(w, http.StatusBadRequest, idleTimeoutRangeMessage)
+		return
+	}
 	server := newServerConfig(body.Name, body.Command)
+	server.IdleTimeoutSeconds = body.IdleTimeoutSeconds
 	server.Port = body.Port
 	server.Directory = body.Directory
 	if body.Env != nil {
@@ -507,6 +513,44 @@ func (s *apiServer) memoryLimit(w http.ResponseWriter, r *http.Request) {
 		value = displayMemorySize(*body.Bytes)
 	}
 	writeOK(w, actionResponse{Affected: []string{}, Message: "Global project memory limit: " + value})
+}
+
+const idleTimeoutRangeMessage = "Idle timeout must be 0 (off) or between 1 minute and 7 days"
+
+func (s *apiServer) idleTimeout(w http.ResponseWriter, r *http.Request) {
+	var body updateIdleTimeoutRequest
+	if err := decodeBody(r, &body); err != nil {
+		writeFail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if body.Seconds != nil && !validIdleTimeout(*body.Seconds) {
+		writeFail(w, http.StatusBadRequest, idleTimeoutRangeMessage)
+		return
+	}
+	value := "inherit"
+	if body.Seconds != nil {
+		value = "off"
+		if *body.Seconds > 0 {
+			value = describeIdleTimeout(*body.Seconds)
+		}
+	}
+	if body.Server != nil {
+		rt := s.sup.resolveRuntime(*body.Server)
+		if rt == nil || rt.isTemporary() {
+			writeFail(w, http.StatusNotFound, "No configured server matching '"+*body.Server+"'")
+			return
+		}
+		st := rt.status()
+		s.sup.updateServerIdleTimeout(rt.id, body.Seconds)
+		writeOK(w, actionResponse{Affected: []string{rt.id}, Message: "Idle timeout for " + st.ProjectName + "/" + st.Name + ": " + value})
+		return
+	}
+	if body.Seconds == nil {
+		writeFail(w, http.StatusBadRequest, "The global idle timeout can be a duration or off, not inherit")
+		return
+	}
+	s.sup.updateGlobalIdleTimeout(body.Seconds)
+	writeOK(w, actionResponse{Affected: []string{}, Message: "Global idle timeout: " + value})
 }
 
 func (s *apiServer) killPort(w http.ResponseWriter, r *http.Request) {

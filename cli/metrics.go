@@ -25,7 +25,10 @@ var (
 )
 
 type processMetrics struct {
-	CPUPercent          float64
+	CPUPercent float64
+	// ActiveCPUPercent is the instantaneous tree sum. CPUPercent is replaced by
+	// the lifetime average on Linux, which stays high long after startup work.
+	ActiveCPUPercent    float64
 	CPUTicks            uint64
 	StartTime           uint64
 	MemoryBytes         uint64
@@ -74,6 +77,7 @@ func sampleMetrics(rootPIDs map[int]struct{}) map[int]processMetrics {
 		}
 		m := totals[root]
 		m.CPUPercent += rec.CPUPercent
+		m.ActiveCPUPercent += rec.CPUPercent
 		m.CPUTicks += rec.CPUTicks
 		m.MemoryBytes += rec.Footprint
 		m.ResidentMemoryBytes += rec.RSSBytes

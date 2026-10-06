@@ -111,6 +111,8 @@ func runCLI(args []string) int {
 		return cmdUpdateServer(g, rest)
 	case "memory-limit", "ram-limit":
 		return cmdMemoryLimit(g, rest)
+	case "idle-timeout", "idle":
+		return cmdIdleTimeout(g, rest)
 	case "remove":
 		return cmdRemove(g, rest)
 	case "take-over", "adopt":
@@ -426,6 +428,7 @@ func cmdAddServer(g globalOpts, args []string) int {
 		return nil
 	})
 	start := fs.Bool("start", false, "start immediately")
+	idle := fs.String("idle-timeout", "", "idle timeout: duration, off, or inherit")
 	var env []string
 	var actions []string
 	fs.Func("env", "KEY=VALUE", func(v string) error { env = append(env, v); return nil })
@@ -433,6 +436,14 @@ func cmdAddServer(g globalOpts, args []string) int {
 	_ = parseFlexible(fs, args)
 	if *project == "" || *name == "" || *command == "" {
 		fail("Pass --project, --name, and --command.")
+	}
+	var idleSeconds *int
+	if *idle != "" {
+		parsed, err := parseIdleTimeout(*idle, true)
+		if err != nil {
+			fail(err.Error())
+		}
+		idleSeconds = parsed
 	}
 	parsedEnv := map[string]string{}
 	for _, entry := range env {
@@ -449,6 +460,8 @@ func cmdAddServer(g globalOpts, args []string) int {
 		AutoRestart: &autoRestart,
 		Start:       start,
 		Actions:     parseServerActions(actions),
+
+		IdleTimeoutSeconds: idleSeconds,
 	}
 	if *port != 0 {
 		body.Port = port
@@ -548,6 +561,35 @@ func cmdMemoryLimit(g globalOpts, args []string) int {
 	}
 	var resp actionResponse
 	if err := c.post("memory-limit", body, &resp); err != nil {
+		fail(err.Error())
+	}
+	emit(resp, g.JSON, func() string { return resp.Message })
+	return 0
+}
+
+func cmdIdleTimeout(g globalOpts, args []string) int {
+	fs := flag.NewFlagSet("idle-timeout", flag.ExitOnError)
+	server := fs.String("server", "", "server")
+	_ = parseFlexible(fs, args)
+	c := newClient(g.APIPort)
+	if fs.NArg() == 0 {
+		var status PortlyStatus
+		if err := c.get("status", &status); err != nil {
+			fail(err.Error())
+		}
+		emit(status, g.JSON, func() string { return renderIdleTimeouts(status) })
+		return 0
+	}
+	seconds, err := parseIdleTimeout(fs.Arg(0), *server != "")
+	if err != nil {
+		fail(err.Error())
+	}
+	body := updateIdleTimeoutRequest{Seconds: seconds}
+	if *server != "" {
+		body.Server = server
+	}
+	var resp actionResponse
+	if err := c.post("idle-timeout", body, &resp); err != nil {
 		fail(err.Error())
 	}
 	emit(resp, g.JSON, func() string { return resp.Message })
@@ -796,6 +838,7 @@ Commands:
   add-server          Add a server to a project
   update-server       Change a server's settings
   memory-limit        Show or set memory guards
+  idle-timeout, idle  Show or set automatic stops for inactive servers
   remove              Remove a server or project
   take-over, adopt    Move an external listener under Portly
   port                Show what is listening on a port
@@ -816,7 +859,11 @@ func commandHelp(cmd string) string {
 		"wait":    "Wait for a temporary job and return its exit code.\nUsage: portly wait <id> [--tail 500] [--no-logs]\n",
 		"forever": "Keep Portly available across Linux logins via systemd --user.\nUsage: portly forever enable|status|disable [--json]\n",
 		"daemon":  "Run the headless supervisor in the foreground.\nUsage: portly daemon [--api-port 7737]\n",
+		"idle-timeout": "Stop servers that print nothing and stay under 5% CPU for a duration.\n" +
+			"Output answering Portly's own health checks does not count. Temporary jobs keep their own --timeout.\n" +
+			"Usage: portly idle-timeout [30m|2h|off] [--server project/server] (a server also accepts inherit)\n",
 	}
+	helps["idle"] = helps["idle-timeout"]
 	if h, ok := helps[cmd]; ok {
 		return h
 	}

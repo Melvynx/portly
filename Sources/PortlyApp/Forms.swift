@@ -222,6 +222,7 @@ struct ServerForm: View {
     @State private var directory = ""
     @State private var healthURL = ""
     @State private var autoRestart = true
+    @State private var idleTimeoutSeconds: Int?
     @State private var envText = ""
     @State private var actionsText = ""
     @State private var suggestions: [CommandDetector.Suggestion] = []
@@ -335,6 +336,14 @@ struct ServerForm: View {
 
         Section("Behavior") {
             Toggle("Restart automatically when it crashes", isOn: $autoRestart)
+            Picker("Stop when idle for", selection: $idleTimeoutSeconds) {
+                Text(globalIdleTimeoutLabel).tag(Int?.none)
+                Text("Never").tag(Int?.some(0))
+                ForEach(idleTimeoutChoices, id: \.self) { seconds in
+                    Text(IdleTimeout.describe(seconds)).tag(Int?.some(seconds))
+                }
+            }
+            .help("Idle means no output and under \(Int(IdleTracker.busyCPUPercent))% CPU. Use Never for databases and quiet workers.")
         }
 
         Section("Project memory guard") {
@@ -443,6 +452,7 @@ struct ServerForm: View {
         directory = server.directory ?? ""
         healthURL = server.healthURL ?? ""
         autoRestart = server.autoRestart
+        idleTimeoutSeconds = server.idleTimeoutSeconds
         envText = server.env.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "\n")
         actionsText = server.actions.map { "\($0.name)=\($0.command)" }.joined(separator: "\n")
         advancedExpanded = !(directory.isEmpty && healthURL.isEmpty && envText.isEmpty && actionsText.isEmpty)
@@ -471,6 +481,16 @@ struct ServerForm: View {
             return "Enter a size of at least 64 MB, for example 5GB."
         }
         return "Examples: 512MB, 5GB, or 5Go. Minimum: 64 MB."
+    }
+
+    private var globalIdleTimeoutLabel: String {
+        let global = supervisor.settings.idleTimeoutSeconds.map(IdleTimeout.describe) ?? "never"
+        return "Use global default (\(global))"
+    }
+
+    private var idleTimeoutChoices: [Int] {
+        let current = idleTimeoutSeconds.flatMap { $0 > 0 ? [$0] : nil } ?? []
+        return Array(Set(IdleTimeout.presets + current)).sorted()
     }
 
     private var globalMemoryLimitMessage: String {
@@ -510,7 +530,8 @@ struct ServerForm: View {
             healthURL: healthURL.isEmpty ? nil : healthURL,
             healthStatus: server?.healthStatus,
             autoRestart: autoRestart,
-            actions: parsedActions ?? []
+            actions: parsedActions ?? [],
+            idleTimeoutSeconds: idleTimeoutSeconds
         )
     }
 }

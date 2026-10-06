@@ -194,6 +194,10 @@ func (s *supervisor) refreshMetrics() {
 			s.restarts[project.ID] = memoryRestart{at: time.Now(), bytes: byProject[project.ID], serverIDs: ids}
 		}
 	}
+	now := time.Now()
+	for _, rt := range s.runtimes {
+		rt.stopIfIdle(now)
+	}
 }
 
 func (s *supervisor) status() PortlyStatus {
@@ -233,11 +237,12 @@ func (s *supervisor) status() PortlyStatus {
 		}
 	}
 	return PortlyStatus{
-		Version:                portlyVersion,
-		APIPort:                s.apiPort,
-		GlobalMemoryLimitBytes: cfg.GlobalMemoryLimitBytes,
-		Projects:               projects,
-		TemporaryServers:       temps,
+		Version:                  portlyVersion,
+		APIPort:                  s.apiPort,
+		GlobalMemoryLimitBytes:   cfg.GlobalMemoryLimitBytes,
+		GlobalIdleTimeoutSeconds: cfg.IdleTimeoutSeconds,
+		Projects:                 projects,
+		TemporaryServers:         temps,
 	}
 }
 
@@ -575,6 +580,36 @@ func (s *supervisor) updateProjectMemoryLimit(projectID string, mode MemoryLimit
 			}
 		}
 	})
+}
+
+func (s *supervisor) updateGlobalIdleTimeout(seconds *int) {
+	s.store.mutate(func(cfg *PortlyConfig) {
+		if seconds == nil || *seconds <= 0 {
+			cfg.IdleTimeoutSeconds = nil
+		} else {
+			value := *seconds
+			cfg.IdleTimeoutSeconds = &value
+		}
+	})
+	s.mu.Lock()
+	s.syncRuntimes()
+	s.mu.Unlock()
+}
+
+func (s *supervisor) updateServerIdleTimeout(serverID string, seconds *int) {
+	s.store.mutate(func(cfg *PortlyConfig) {
+		for i := range cfg.Projects {
+			for j := range cfg.Projects[i].Servers {
+				if cfg.Projects[i].Servers[j].ID == serverID {
+					cfg.Projects[i].Servers[j].IdleTimeoutSeconds = seconds
+					return
+				}
+			}
+		}
+	})
+	s.mu.Lock()
+	s.syncRuntimes()
+	s.mu.Unlock()
 }
 
 func (s *supervisor) serverConfiguredOn(port int, excluding string) *resolvedServer {

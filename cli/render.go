@@ -215,7 +215,39 @@ func detailedLine(s ServerStatus) string {
 	if s.LastExitCode != nil {
 		exit = fmt.Sprintf(" exit:%d", *s.LastExitCode)
 	}
-	return fmt.Sprintf("  %s %s%s  %s%s%s%s%s%s%s%s%s", stateGlyph(s), s.Name, port, outcome, duration, timeout, exit, cpu, memory, resident, processes, restarts)
+	return fmt.Sprintf("  %s %s%s  %s%s%s%s%s%s%s%s%s%s", stateGlyph(s), s.Name, port, outcome, duration, timeout, exit, cpu, memory, resident, processes, restarts, idleSummary(s))
+}
+
+func idleSummary(s ServerStatus) string {
+	if s.State == StateStopped && s.IdleStoppedAt != nil {
+		return " idle-stopped:" + s.IdleStoppedAt.Time.Format("15:04")
+	}
+	if s.IdleTimeoutSeconds == nil {
+		return ""
+	}
+	quiet := ""
+	if s.LastActivityAt != nil {
+		quiet = " quiet:" + displayTimeout(max(0, int(time.Since(s.LastActivityAt.Time).Seconds())))
+	}
+	return " idle-stop:" + displayTimeout(*s.IdleTimeoutSeconds) + quiet
+}
+
+func renderIdleTimeouts(status PortlyStatus) string {
+	global := "off"
+	if status.GlobalIdleTimeoutSeconds != nil {
+		global = displayTimeout(*status.GlobalIdleTimeoutSeconds)
+	}
+	lines := []string{"Global: " + global}
+	for _, project := range status.Projects {
+		for _, server := range project.Servers {
+			effective := "off"
+			if server.IdleTimeoutSeconds != nil {
+				effective = displayTimeout(*server.IdleTimeoutSeconds)
+			}
+			lines = append(lines, fmt.Sprintf("%s/%s: %s", project.Name, server.Name, effective))
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func renderMemoryLimits(status PortlyStatus) string {

@@ -169,6 +169,9 @@ final class ControlServer {
                 guard validActions(body.actions ?? []) else {
                     return (400, try fail("Actions need unique non-empty names and non-empty commands"))
                 }
+                if let seconds = body.idleTimeoutSeconds, !validIdleTimeout(seconds) {
+                    return (400, try fail(idleTimeoutRangeMessage))
+                }
                 let server = ServerConfig(
                     name: body.name,
                     command: body.command,
@@ -178,7 +181,8 @@ final class ControlServer {
                     healthURL: body.healthURL,
                     healthStatus: body.healthStatus,
                     autoRestart: body.autoRestart ?? true,
-                    actions: body.actions ?? []
+                    actions: body.actions ?? [],
+                    idleTimeoutSeconds: body.idleTimeoutSeconds
                 )
                 supervisor.addServer(projectID: project.id, server: server)
                 if body.start == true { supervisor.start(serverID: server.id) }
@@ -282,6 +286,32 @@ final class ControlServer {
                 return (200, try ok(PortlyAPI.ActionResponse(
                     affected: [],
                     message: "Global project memory limit: \(value)"
+                )))
+
+            case ("POST", "/idle-timeout"):
+                let body: PortlyAPI.UpdateIdleTimeoutRequest = try request.decode()
+                if let seconds = body.seconds, !validIdleTimeout(seconds) {
+                    return (400, try fail(idleTimeoutRangeMessage))
+                }
+                let value = body.seconds.map { $0 == 0 ? "off" : IdleTimeout.describe($0) }
+                if let query = body.server {
+                    guard let runtime = supervisor.resolveServer(query),
+                          !supervisor.temporaryRuntimeIDs.contains(runtime.id) else {
+                        return (404, try fail("No configured server matching '\(query)'"))
+                    }
+                    supervisor.updateServerIdleTimeout(serverID: runtime.id, seconds: body.seconds)
+                    return (200, try ok(PortlyAPI.ActionResponse(
+                        affected: [runtime.id],
+                        message: "Idle timeout for \(runtime.projectName)/\(runtime.config.name): \(value ?? "inherit")"
+                    )))
+                }
+                guard body.seconds != nil else {
+                    return (400, try fail("The global idle timeout can be a duration or off, not inherit"))
+                }
+                supervisor.updateGlobalIdleTimeout(body.seconds)
+                return (200, try ok(PortlyAPI.ActionResponse(
+                    affected: [],
+                    message: "Global idle timeout: \(value ?? "off")"
                 )))
 
             case ("POST", "/servers/update"):
@@ -423,6 +453,12 @@ final class ControlServer {
         guard let bytes else { return false }
         return (MemorySize.minimumLimitBytes...MemorySize.maximumLimitBytes).contains(bytes)
     }
+
+    private func validIdleTimeout(_ seconds: Int) -> Bool {
+        seconds == 0 || IdleTimeout.isValid(seconds)
+    }
+
+    private let idleTimeoutRangeMessage = "Idle timeout must be 0 (off) or between 1 minute and 7 days"
 
     private func validActions(_ actions: [ServerAction]) -> Bool {
         var seen = Set<String>()

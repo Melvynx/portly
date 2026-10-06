@@ -79,6 +79,10 @@ portly memory-limit 3GB --project lumail.io
 portly memory-limit inherit --project lumail.io
 portly memory-limit off
 
+portly idle-timeout 30m
+portly idle-timeout off --server lumail.io/redis
+portly idle-timeout inherit --server lumail.io/redis
+
 job_id="$(portly temp 'npm run build' --timeout 20m)"
 portly wait "$job_id"
 
@@ -112,7 +116,7 @@ portly take-over codelynx/web --json
 portly stop --project codelynx --json
 ```
 
-Other commands are `temp` (`temporary`, `run-temp`), `wait`, `action`, `memory-limit` (`ram-limit`), `start`, `stop`, `restart`, `take-over` (`adopt`), `update-server`, `remove`, `port`, `kill-port`, `open`, `quit`, `forever`, and `config`. `temp` returns a job ID immediately; `wait` blocks for that ID and exits with the job's real exit code (`124` for timeout). `action` runs a configured maintenance command beside a server without restarting it. `memory-limit` shows or changes the global default and project overrides; it is off by default. `take-over` stops an external listener on the configured port and relaunches the server under Portly. `forever` manages the per-user macOS LaunchAgent. Run `portly <command> --help` for exact flags. `quit` stops every managed server because the app is the supervisor.
+Other commands are `temp` (`temporary`, `run-temp`), `wait`, `action`, `memory-limit` (`ram-limit`), `start`, `stop`, `restart`, `take-over` (`adopt`), `update-server`, `remove`, `port`, `kill-port`, `open`, `quit`, `forever`, and `config`. `temp` returns a job ID immediately; `wait` blocks for that ID and exits with the job's real exit code (`124` for timeout). `action` runs a configured maintenance command beside a server without restarting it. `memory-limit` shows or changes the global default and project overrides; it is off by default. `idle-timeout` (`idle`) stops a server that has printed nothing and stayed under 5% CPU for the configured duration; output that only answers Portly's own health checks does not count. It is off by default, servers inherit the global value, and `--server <project/server> off` exempts quiet workloads such as databases. An idle stop is a normal stop, so Portly does not restart the server. `take-over` stops an external listener on the configured port and relaunches the server under Portly. `forever` manages the per-user macOS LaunchAgent. Run `portly <command> --help` for exact flags. `quit` stops every managed server because the app is the supervisor.
 
 ## Configuration
 
@@ -177,6 +181,7 @@ The control API listens only on `127.0.0.1:7737`. It can start processes, so it 
 | `POST` | `/temporary/run` | Start a supervised background job outside any project |
 | `POST` | `/actions/run` | Run a configured server action without restarting it |
 | `POST` | `/memory-limit` | Configure the global default or a project memory guard |
+| `POST` | `/idle-timeout` | Configure the global default or a server inactivity stop (`{"server"?, "seconds"}`; `0` = never, `null` = inherit) |
 | `POST` | `/projects/add`, `/projects/remove` | Mutate projects |
 | `POST` | `/servers/add`, `/servers/update`, `/servers/remove` | Mutate servers |
 | `POST` | `/servers/take-over` | Move an external listener under Portly |

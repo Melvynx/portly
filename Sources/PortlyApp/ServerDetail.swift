@@ -190,13 +190,16 @@ struct ServerDetail: View {
                         systemImage: "arrow.clockwise"
                     )
                 }
+                if runtime.isRunning, let idleTimeout = runtime.idleTimeoutSeconds {
+                    fact("Idle stop \(TemporaryTimeout.display(idleTimeout))", systemImage: "moon.zzz")
+                }
 
                 Spacer()
 
                 if let error = runtime.lastError {
                     Text(error)
                         .font(.system(size: 11))
-                        .foregroundStyle(.red)
+                        .foregroundStyle(runtime.idleStoppedAt == nil ? Color.red : Color.secondary)
                         .lineLimit(1)
                         .help(error)
                 }

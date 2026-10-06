@@ -21,6 +21,7 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
     @Published private(set) var temporaryDeadline: Date?
     @Published private(set) var temporaryFinishedAt: Date?
     @Published private(set) var temporaryTimedOut = false
+    @Published private(set) var idleStoppedAt: Date?
 
     let id: String
     private(set) var config: ServerConfig
@@ -48,6 +49,8 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
     private var temporaryStartedAt: Date?
     private var temporaryStoppedByUser = false
     private var timeoutWork: DispatchWorkItem?
+    /// Main-thread only.
+    private var idle = IdleTracker()
 
     /// Called when a server lands in `.failed`, for the macOS notification.
     var onFailed: ((ServerRuntime) -> Void)?
@@ -115,11 +118,19 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
             timeoutSeconds: temporaryTimeoutSeconds,
             deadline: temporaryDeadline,
             finishedAt: temporaryFinishedAt,
-            timedOut: isTemporaryJob ? temporaryTimedOut : nil
+            timedOut: isTemporaryJob ? temporaryTimedOut : nil,
+            idleTimeoutSeconds: idleTimeoutSeconds,
+            lastActivityAt: isRunning ? idle.lastActivityAt : nil,
+            idleStoppedAt: idleStoppedAt
         )
     }
 
     var isTemporaryJob: Bool { temporaryTimeoutSeconds != nil }
+
+    /// Temporary jobs already have a hard deadline, so they never idle out.
+    var idleTimeoutSeconds: Int? {
+        isTemporaryJob ? nil : config.effectiveIdleTimeout(global: settings.idleTimeoutSeconds)
+    }
 
     var temporaryJobStatus: TemporaryJobStatus? {
         guard let timeoutSeconds = temporaryTimeoutSeconds else { return nil }
@@ -159,6 +170,22 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
 
     func updateProcessMetrics(_ metrics: ProcessMetrics?) {
         processMetrics = metrics
+        if let metrics { idle.recordCPU(metrics.cpuPercent, at: Date()) }
+    }
+
+    /// Called on every metrics tick, after CPU has been recorded.
+    func stopIfIdle(now: Date = Date()) {
+        guard let timeout = idleTimeoutSeconds,
+              !manualStop,
+              state != .restarting,
+              let process, process.running,
+              idle.isIdle(timeoutSeconds: timeout, now: now) else { return }
+        let message = "Stopped after \(IdleTimeout.describe(timeout)) without output or CPU activity"
+        lastError = message
+        idleStoppedAt = now
+        logs.note("idle guard: \(message)")
+        terminal?.feed(text: "\r\n\u{1B}[33m[portly] \(message)\u{1B}[0m\r\n")
+        stop()
     }
 
     private func expand(_ path: String) -> String {
@@ -320,6 +347,7 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
     private func spawn() {
         setState(.starting)
         lastError = nil
+        idleStoppedAt = nil
         healthy = false
         consecutiveHealthFailures = 0
 
@@ -359,6 +387,7 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
             self.pid = proc.shellPid
             let launchedAt = Date()
             self.startedAt = launchedAt
+            self.idle.reset(at: launchedAt)
             if self.isTemporaryJob {
                 self.temporaryStartedAt = launchedAt
                 self.scheduleTemporaryTimeout()
@@ -502,6 +531,9 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
 
     private func runHealthCheck() {
         guard isRunning, let proc = process, proc.running else { return }
+        if config.port != nil || config.healthURL != nil {
+            idle.recordProbe(at: Date(), interval: healthTimer?.timeInterval ?? 1)
+        }
         HealthChecker.check(server: config) { [weak self] ok in
             DispatchQueue.main.async { self?.handleHealthResult(ok) }
         }
@@ -611,6 +643,7 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
             self.healthy = false
             self.processMetrics = nil
             self.process = nil
+            self.idle.clear()
             if self.isTemporaryJob { self.temporaryFinishedAt = Date() }
 
             let code = normalizedExitCode.map(String.init) ?? "signal"
@@ -639,7 +672,9 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
 
     func dataReceived(slice: ArraySlice<UInt8>) {
         logs.append(bytes: slice)
+        let receivedAt = Date()
         DispatchQueue.main.async { [weak self] in
+            self?.idle.recordOutput(at: receivedAt)
             self?.terminal?.feed(byteArray: slice)
         }
     }
@@ -658,6 +693,7 @@ final class ServerRuntime: NSObject, ObservableObject, LocalProcessDelegate, Ter
     // MARK: - TerminalViewDelegate (keyboard goes back to the process)
 
     func send(source: TerminalView, data: ArraySlice<UInt8>) {
+        idle.recordInput(at: Date())
         process?.send(data: data)
     }
 

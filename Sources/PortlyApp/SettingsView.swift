@@ -170,10 +170,23 @@ private struct RuntimeSettingsView: View {
     @State private var maxRestartAttempts = 5
     @State private var logBufferLines = 5_000
     @State private var logFileMaxMB = 10
+    @State private var idleTimeoutSeconds = 0
     @State private var saved = false
 
     var body: some View {
         Form {
+            Section("Inactivity") {
+                Picker("Stop idle servers after", selection: $idleTimeoutSeconds) {
+                    Text("Never").tag(0)
+                    ForEach(idleTimeoutChoices, id: \.self) { seconds in
+                        Text(IdleTimeout.describe(seconds)).tag(seconds)
+                    }
+                }
+                Text("A server is idle when it prints nothing and stays under \(Int(IdleTracker.busyCPUPercent))% CPU. Output answering Portly's own health checks does not count. Each server can override this.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Health checks") {
                 Stepper(
                     "Check every \(healthIntervalSeconds) seconds",
@@ -225,6 +238,14 @@ private struct RuntimeSettingsView: View {
         .onChange(of: maxRestartAttempts) { saved = false }
         .onChange(of: logBufferLines) { saved = false }
         .onChange(of: logFileMaxMB) { saved = false }
+        .onChange(of: idleTimeoutSeconds) { saved = false }
+    }
+
+    /// Keeps a custom value set through the CLI selectable instead of
+    /// silently snapping it to a preset.
+    private var idleTimeoutChoices: [Int] {
+        let current = supervisor.settings.idleTimeoutSeconds.map { [$0] } ?? []
+        return Array(Set(IdleTimeout.presets + current)).sorted()
     }
 
     private var hasChanges: Bool {
@@ -233,6 +254,7 @@ private struct RuntimeSettingsView: View {
             || maxRestartAttempts != settings.maxRestartAttempts
             || logBufferLines != settings.logBufferLines
             || logFileMaxMB != settings.logFileMaxMB
+            || idleTimeoutSeconds != (settings.idleTimeoutSeconds ?? 0)
     }
 
     private func load() {
@@ -241,6 +263,7 @@ private struct RuntimeSettingsView: View {
         maxRestartAttempts = settings.maxRestartAttempts
         logBufferLines = settings.logBufferLines
         logFileMaxMB = settings.logFileMaxMB
+        idleTimeoutSeconds = settings.idleTimeoutSeconds ?? 0
     }
 
     private func save() {
@@ -248,7 +271,8 @@ private struct RuntimeSettingsView: View {
             healthIntervalSeconds: healthIntervalSeconds,
             maxRestartAttempts: maxRestartAttempts,
             logBufferLines: logBufferLines,
-            logFileMaxMB: logFileMaxMB
+            logFileMaxMB: logFileMaxMB,
+            idleTimeoutSeconds: idleTimeoutSeconds
         )
         saved = true
     }

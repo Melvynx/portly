@@ -42,6 +42,9 @@ type serverRuntime struct {
 	stoppedByUser      bool
 	temporaryStartedAt time.Time
 
+	idle          idleTracker
+	idleStoppedAt time.Time
+
 	takeoverPending bool
 	healthFails     int
 	lastHealthyAt   time.Time
@@ -169,7 +172,38 @@ func (r *serverRuntime) status() ServerStatus {
 		timedOut := r.timedOut
 		st.TimedOut = &timedOut
 	}
+	st.IdleTimeoutSeconds = r.idleTimeoutLocked()
+	if r.state.isActive() && !r.idle.lastActivityAt.IsZero() {
+		st.LastActivityAt = ptrTime(r.idle.lastActivityAt)
+	}
+	if !r.idleStoppedAt.IsZero() {
+		st.IdleStoppedAt = ptrTime(r.idleStoppedAt)
+	}
 	return st
+}
+
+// Temporary jobs already have a hard deadline, so they never idle out.
+func (r *serverRuntime) idleTimeoutLocked() *int {
+	if r.timeoutSeconds != nil {
+		return nil
+	}
+	return r.config.effectiveIdleTimeout(r.settings.IdleTimeoutSeconds)
+}
+
+// stopIfIdle runs on every metrics tick, after CPU has been recorded.
+func (r *serverRuntime) stopIfIdle(now time.Time) {
+	r.mu.Lock()
+	timeout := r.idleTimeoutLocked()
+	if timeout == nil || r.manualStop || r.state == StateRestarting || r.child == nil || !r.idle.isIdle(*timeout, now) {
+		r.mu.Unlock()
+		return
+	}
+	msg := fmt.Sprintf("Stopped after %s without output or CPU activity", describeIdleTimeout(*timeout))
+	r.lastError = &msg
+	r.idleStoppedAt = now
+	r.logs.note("idle guard: " + msg)
+	r.mu.Unlock()
+	r.stop(nil)
 }
 
 func (r *serverRuntime) jobStatus() *TemporaryJobStatus {
@@ -304,6 +338,7 @@ func (r *serverRuntime) spawn() {
 	r.mu.Lock()
 	r.setStateLocked(StateStarting)
 	r.lastError = nil
+	r.idleStoppedAt = time.Time{}
 	r.healthy = false
 	r.healthFails = 0
 	cfg := r.config
@@ -336,6 +371,7 @@ func (r *serverRuntime) spawn() {
 	pid := child.pid()
 	r.pid = &pid
 	r.startedAt = time.Now()
+	r.idle.reset(r.startedAt)
 	if r.timeoutSeconds != nil {
 		r.temporaryStartedAt = r.startedAt
 		r.scheduleTimeoutLocked()
@@ -362,6 +398,9 @@ func (r *serverRuntime) consumeOutput(reader io.Reader) {
 		n, err := reader.Read(buf)
 		if n > 0 {
 			r.logs.appendBytes(buf[:n])
+			r.mu.Lock()
+			r.idle.recordOutput(time.Now())
+			r.mu.Unlock()
 		}
 		if err != nil {
 			return
@@ -387,6 +426,7 @@ func (r *serverRuntime) waitChild(child *childProcess) {
 	r.healthy = false
 	r.metrics = nil
 	r.child = nil
+	r.idle.clear()
 	if r.timeoutSeconds != nil {
 		r.finishedAt = time.Now()
 	}
@@ -505,17 +545,19 @@ func (r *serverRuntime) startHealthLocked() {
 		defer ticker.Stop()
 		steady := false
 		interval := time.Duration(max(2, r.settings.HealthIntervalSeconds)) * time.Second
+		current := time.Second
 		for {
 			select {
 			case <-stop:
 				return
 			case <-ticker.C:
-				r.runHealth()
+				r.runHealth(current)
 				r.mu.Lock()
 				state := r.state
 				r.mu.Unlock()
 				if !steady && (state == StateRunning || state == StateUnhealthy) {
 					ticker.Reset(interval)
+					current = interval
 					steady = true
 				}
 			}
@@ -530,10 +572,13 @@ func (r *serverRuntime) stopHealthLocked() {
 	}
 }
 
-func (r *serverRuntime) runHealth() {
+func (r *serverRuntime) runHealth(interval time.Duration) {
 	r.mu.Lock()
 	running := r.state.isActive()
 	cfg := r.config
+	if running && (cfg.Port != nil || cfg.HealthURL != nil) {
+		r.idle.recordProbe(time.Now(), interval)
+	}
 	r.mu.Unlock()
 	if !running {
 		return
@@ -681,6 +726,9 @@ func (r *serverRuntime) updateMetrics(m *processMetrics) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.metrics = m
+	if m != nil {
+		r.idle.recordCPU(m.ActiveCPUPercent, time.Now())
+	}
 }
 
 func (r *serverRuntime) logTail(n int) []string { return r.logs.tail(n) }

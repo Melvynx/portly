@@ -71,6 +71,8 @@ public enum PortlyAPI {
         public var healthStatus: Int?
         public var autoRestart: Bool?
         public var actions: [ServerAction]?
+        /// Nil inherits the global default, 0 turns idle stops off.
+        public var idleTimeoutSeconds: Int?
         /// Start the server immediately after adding it.
         public var start: Bool?
 
@@ -78,7 +80,8 @@ public enum PortlyAPI {
             project: String, name: String, command: String, port: Int? = nil,
             directory: String? = nil, env: [String: String]? = nil,
             healthURL: String? = nil, healthStatus: Int? = nil,
-            autoRestart: Bool? = nil, actions: [ServerAction]? = nil, start: Bool? = nil
+            autoRestart: Bool? = nil, actions: [ServerAction]? = nil,
+            idleTimeoutSeconds: Int? = nil, start: Bool? = nil
         ) {
             self.project = project
             self.name = name
@@ -90,6 +93,7 @@ public enum PortlyAPI {
             self.healthStatus = healthStatus
             self.autoRestart = autoRestart
             self.actions = actions
+            self.idleTimeoutSeconds = idleTimeoutSeconds
             self.start = start
         }
     }
@@ -201,6 +205,18 @@ public enum PortlyAPI {
             self.project = project
             self.mode = mode
             self.bytes = bytes
+        }
+    }
+
+    public struct UpdateIdleTimeoutRequest: Codable {
+        /// Omit to change the global default.
+        public var server: String?
+        /// 0 turns idle stops off. Nil is only valid with `server` and inherits the global default.
+        public var seconds: Int?
+
+        public init(server: String? = nil, seconds: Int?) {
+            self.server = server
+            self.seconds = seconds
         }
     }
 
