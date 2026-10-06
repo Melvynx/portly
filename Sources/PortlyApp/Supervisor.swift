@@ -628,15 +628,13 @@ final class Supervisor: ObservableObject {
         healthIntervalSeconds: Int,
         maxRestartAttempts: Int,
         logBufferLines: Int,
-        logFileMaxMB: Int,
-        idleTimeoutSeconds: Int?
+        logFileMaxMB: Int
     ) {
         store.mutate { config in
             config.healthIntervalSeconds = healthIntervalSeconds
             config.maxRestartAttempts = maxRestartAttempts
             config.logBufferLines = logBufferLines
             config.logFileMaxMB = logFileMaxMB
-            config.idleTimeoutSeconds = idleTimeoutSeconds.flatMap { $0 > 0 ? $0 : nil }
         }
         refresh()
     }

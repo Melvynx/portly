@@ -18,6 +18,8 @@ struct SettingsView: View {
                 .tabItem { Label("Servers", systemImage: "server.rack") }
             MemoryGuardSettingsView()
                 .tabItem { Label("Memory", systemImage: "memorychip") }
+            InactivitySettingsView()
+                .tabItem { Label("Inactivity", systemImage: "moon.zzz") }
         }
         .frame(width: 680, height: 560)
     }
@@ -170,23 +172,10 @@ private struct RuntimeSettingsView: View {
     @State private var maxRestartAttempts = 5
     @State private var logBufferLines = 5_000
     @State private var logFileMaxMB = 10
-    @State private var idleTimeoutSeconds = 0
     @State private var saved = false
 
     var body: some View {
         Form {
-            Section("Inactivity") {
-                Picker("Stop idle servers after", selection: $idleTimeoutSeconds) {
-                    Text("Never").tag(0)
-                    ForEach(idleTimeoutChoices, id: \.self) { seconds in
-                        Text(IdleTimeout.describe(seconds)).tag(seconds)
-                    }
-                }
-                Text("A server is idle when it prints nothing and stays under \(Int(IdleTracker.busyCPUPercent))% CPU. Output answering Portly's own health checks does not count. Each server can override this.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
             Section("Health checks") {
                 Stepper(
                     "Check every \(healthIntervalSeconds) seconds",
@@ -238,14 +227,6 @@ private struct RuntimeSettingsView: View {
         .onChange(of: maxRestartAttempts) { saved = false }
         .onChange(of: logBufferLines) { saved = false }
         .onChange(of: logFileMaxMB) { saved = false }
-        .onChange(of: idleTimeoutSeconds) { saved = false }
-    }
-
-    /// Keeps a custom value set through the CLI selectable instead of
-    /// silently snapping it to a preset.
-    private var idleTimeoutChoices: [Int] {
-        let current = supervisor.settings.idleTimeoutSeconds.map { [$0] } ?? []
-        return Array(Set(IdleTimeout.presets + current)).sorted()
     }
 
     private var hasChanges: Bool {
@@ -254,7 +235,6 @@ private struct RuntimeSettingsView: View {
             || maxRestartAttempts != settings.maxRestartAttempts
             || logBufferLines != settings.logBufferLines
             || logFileMaxMB != settings.logFileMaxMB
-            || idleTimeoutSeconds != (settings.idleTimeoutSeconds ?? 0)
     }
 
     private func load() {
@@ -263,7 +243,6 @@ private struct RuntimeSettingsView: View {
         maxRestartAttempts = settings.maxRestartAttempts
         logBufferLines = settings.logBufferLines
         logFileMaxMB = settings.logFileMaxMB
-        idleTimeoutSeconds = settings.idleTimeoutSeconds ?? 0
     }
 
     private func save() {
@@ -271,10 +250,127 @@ private struct RuntimeSettingsView: View {
             healthIntervalSeconds: healthIntervalSeconds,
             maxRestartAttempts: maxRestartAttempts,
             logBufferLines: logBufferLines,
-            logFileMaxMB: logFileMaxMB,
-            idleTimeoutSeconds: idleTimeoutSeconds
+            logFileMaxMB: logFileMaxMB
         )
         saved = true
+    }
+}
+
+private struct InactivitySettingsView: View {
+    @EnvironmentObject private var supervisor: Supervisor
+
+    var body: some View {
+        Form {
+            Section {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Automatic idle stop", systemImage: "moon.zzz")
+                        .font(PortlyTypography.bodyMedium)
+                    Text("A server is idle when it prints nothing and stays under \(Int(IdleTracker.busyCPUPercent))% CPU. Output answering Portly's own health checks does not count. Idle servers are stopped, not restarted. Turn it off for databases, queues, and quiet workers.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 4)
+            }
+
+            Section("Global default") {
+                Picker("Stop idle servers after", selection: globalBinding) {
+                    Text("Never").tag(0)
+                    ForEach(choices(including: supervisor.settings.idleTimeoutSeconds), id: \.self) { seconds in
+                        Text(IdleTimeout.describe(seconds)).tag(seconds)
+                    }
+                }
+            }
+
+            if supervisor.projects.isEmpty {
+                Section("Servers") {
+                    Text("No projects configured.")
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                ForEach(supervisor.projects) { project in
+                    Section {
+                        ForEach(project.servers) { server in
+                            serverRow(server)
+                        }
+                    } header: {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(Color(hex: project.color))
+                                .frame(width: 8, height: 8)
+                            Text(project.name)
+                        }
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var globalBinding: Binding<Int> {
+        Binding(
+            get: { supervisor.settings.idleTimeoutSeconds ?? 0 },
+            set: { supervisor.updateGlobalIdleTimeout($0) }
+        )
+    }
+
+    /// `nil` inherits the global default, `0` disables idle stops for the server.
+    private func serverBinding(_ server: ServerConfig) -> Binding<Int?> {
+        Binding(
+            get: { server.idleTimeoutSeconds },
+            set: { supervisor.updateServerIdleTimeout(serverID: server.id, seconds: $0) }
+        )
+    }
+
+    /// Keeps a custom value set through the CLI selectable instead of
+    /// silently snapping it to a preset.
+    private func choices(including current: Int?) -> [Int] {
+        let extra = current.flatMap { $0 > 0 ? [$0] : nil } ?? []
+        return Array(Set(IdleTimeout.presets + extra)).sorted()
+    }
+
+    private func serverRow(_ server: ServerConfig) -> some View {
+        let global = supervisor.settings.idleTimeoutSeconds
+        return HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(server.name)
+                    .font(PortlyTypography.bodyMedium)
+                if let detail = idleDetail(for: server) {
+                    Text(detail)
+                        .font(PortlyTypography.metadata)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+
+            Spacer()
+
+            Picker("", selection: serverBinding(server)) {
+                Text("Global (\(global.map(IdleTimeout.describe) ?? "never"))").tag(Int?.none)
+                Text("Never").tag(Int?.some(0))
+                ForEach(choices(including: server.idleTimeoutSeconds), id: \.self) { seconds in
+                    Text(IdleTimeout.describe(seconds)).tag(Int?.some(seconds))
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+            .accessibilityLabel("Idle stop for \(server.name)")
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func idleDetail(for server: ServerConfig) -> String? {
+        guard let runtime = supervisor.runtime(for: server.id) else { return nil }
+        let status = runtime.status
+        if runtime.isRunning, let timeout = status.idleTimeoutSeconds, let last = status.lastActivityAt {
+            let quiet = max(0, Int(Date().timeIntervalSince(last)))
+            return "Running · quiet \(quiet / 60)m of \(timeout / 60)m"
+        }
+        if runtime.isRunning { return "Running" }
+        if let stoppedAt = status.idleStoppedAt {
+            return "Stopped for inactivity at \(stoppedAt.formatted(date: .omitted, time: .shortened))"
+        }
+        return nil
     }
 }
 
