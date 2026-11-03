@@ -51,7 +51,7 @@ func dockerContainerPublishing(port int) *dockerContainer {
 	if exe == "" {
 		return nil
 	}
-	listed, err := exec.Command(exe, "ps", "--filter", fmt.Sprintf("publish=%d", port), "--format", "{{.ID}}").Output()
+	listed, err := hiddenCommand(exe, "ps", "--filter", fmt.Sprintf("publish=%d", port), "--format", "{{.ID}}").Output()
 	if err != nil {
 		return nil
 	}
@@ -60,7 +60,7 @@ func dockerContainerPublishing(port int) *dockerContainer {
 		return nil
 	}
 	args := append([]string{"inspect"}, ids...)
-	inspected, err := exec.Command(exe, args...).Output()
+	inspected, err := hiddenCommand(exe, args...).Output()
 	if err != nil {
 		return nil
 	}
@@ -113,7 +113,7 @@ func stopDockerContainer(container dockerContainer) error {
 	if exe == "" {
 		return fmt.Errorf("Docker CLI is unavailable, so Portly cannot identify the container safely")
 	}
-	out, err := exec.Command(exe, "stop", "--time", "10", container.ID).CombinedOutput()
+	out, err := hiddenCommand(exe, "stop", "--time", "10", container.ID).CombinedOutput()
 	if err != nil {
 		detail := strings.TrimSpace(string(out))
 		if detail == "" {
@@ -126,5 +126,5 @@ func stopDockerContainer(container dockerContainer) error {
 
 func isDockerDaemonCommand(command string) bool {
 	lower := strings.ToLower(command)
-	return strings.Contains(lower, "dockerd") || strings.Contains(lower, "com.docker.backend")
+	return strings.Contains(lower, "dockerd") || strings.Contains(lower, "com.docker.backend") || strings.Contains(lower, "wslrelay")
 }

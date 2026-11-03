@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -152,10 +153,14 @@ func TestTempWaitIntegration(t *testing.T) {
 	c := newClient(srv.port)
 	dir := t.TempDir()
 	timeout := 30
+	command := "printf 'hello-portly\\n'; exit 3"
+	if runtime.GOOS == "windows" {
+		command = "echo hello-portly& exit /b 3"
+	}
 	var job TemporaryJobStatus
 	if err := c.post("temporary/run", runTemporaryRequest{
 		Name:           "echo-job",
-		Command:        "printf 'hello-portly\\n'; exit 3",
+		Command:        command,
 		Directory:      dir,
 		TimeoutSeconds: &timeout,
 	}, &job); err != nil {
@@ -215,11 +220,15 @@ func TestProjectServerLifecycle(t *testing.T) {
 	}
 	start := true
 	port := freePort(t)
+	python := "python3"
+	if runtime.GOOS == "windows" {
+		python = "python"
+	}
 	var server ServerConfig
 	if err := c.post("servers/add", addServerRequest{
 		Project: project.Name,
 		Name:    "web",
-		Command: "python3 -m http.server " + itoa(port),
+		Command: python + " -m http.server " + itoa(port),
 		Port:    &port,
 		Start:   &start,
 	}, &server); err != nil {
@@ -312,4 +321,17 @@ func freePort(t *testing.T) int {
 	port := ln.Addr().(*net.TCPAddr).Port
 	_ = ln.Close()
 	return port
+}
+
+func TestParseNetstatListenerIgnoresLocalizedStateAndClients(t *testing.T) {
+	out := "  Proto  Adresse locale         Adresse distante       État\r\n" +
+		"  TCP    127.0.0.1:51730        127.0.0.1:5173         ESTABLISHED     900\r\n" +
+		"  TCP    0.0.0.0:15173          0.0.0.0:0              LISTENING       901\r\n" +
+		"  TCP    [::1]:5173             [::]:0                 ABHÖREN         4242\r\n"
+	if pid := parseNetstatListener(out, 5173); pid != 4242 {
+		t.Fatalf("pid=%d", pid)
+	}
+	if pid := parseNetstatListener(out, 5174); pid != 0 {
+		t.Fatalf("pid=%d", pid)
+	}
 }

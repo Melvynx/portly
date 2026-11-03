@@ -34,6 +34,16 @@ func (s *logStore) appendBytes(chunk []byte) {
 	s.ingest(string(chunk))
 }
 
+// closeFile releases the log handle; Windows cannot delete a file held open.
+func (s *logStore) closeFile() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.file != nil {
+		_ = s.file.Close()
+		s.file = nil
+	}
+}
+
 func (s *logStore) note(message string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

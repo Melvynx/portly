@@ -9,7 +9,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 )
 
 type listener struct {
@@ -26,6 +25,9 @@ type stopOutcome struct {
 }
 
 func occupantOf(port int) *listener {
+	if runtime.GOOS == "windows" {
+		return occupantFromNetstat(port)
+	}
 	if occ := occupantFromProc(port); occ != nil {
 		return occ
 	}
@@ -57,7 +59,7 @@ func stopOccupant(port int, expectedPID *int) (stopOutcome, error) {
 	if isDockerDaemonCommand(occ.Command) {
 		return stopOutcome{}, fmt.Errorf("Refusing to signal the Docker daemon. Stop the published container instead.")
 	}
-	if err := syscall.Kill(occ.PID, syscall.SIGTERM); err != nil {
+	if err := terminatePID(occ.PID); err != nil {
 		return stopOutcome{}, fmt.Errorf("Process %d refused the stop request.", occ.PID)
 	}
 	pid := occ.PID
@@ -220,5 +222,40 @@ func currentUser() string {
 	if u := os.Getenv("USER"); u != "" {
 		return u
 	}
+	if u := os.Getenv("USERNAME"); u != "" {
+		return u
+	}
 	return ""
+}
+
+func occupantFromNetstat(port int) *listener {
+	out, err := hiddenCommand("netstat", "-ano", "-p", "TCP").Output()
+	if err != nil {
+		return nil
+	}
+	v6, _ := hiddenCommand("netstat", "-ano", "-p", "TCPv6").Output()
+	pid := parseNetstatListener(string(out)+string(v6), port)
+	if pid == 0 {
+		return nil
+	}
+	return &listener{Port: port, PID: pid, Command: processName(pid), User: currentUser()}
+}
+
+// parseNetstatListener finds the PID listening on port. The state column is
+// localized, so a listener is recognized by its unbound remote address instead.
+func parseNetstatListener(out string, port int) int {
+	suffix := ":" + strconv.Itoa(port)
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Fields(line)
+		if len(f) != 5 || !strings.HasPrefix(f[0], "TCP") || !strings.HasSuffix(f[1], suffix) {
+			continue
+		}
+		if f[2] != "0.0.0.0:0" && f[2] != "[::]:0" {
+			continue
+		}
+		if pid, err := strconv.Atoi(f[4]); err == nil && pid > 0 {
+			return pid
+		}
+	}
+	return 0
 }
